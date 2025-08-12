@@ -879,7 +879,7 @@ def export_produkty_with_orders():
                 conn,
                 PRODUKTY_TABLE_NAME,
                 'composite_key',  # Primary key для upsert
-                table_columns + ['composite_key'],  # Добавляем составной ключ
+                table_columns,  # Используем существующие колонки (composite_key уже там)
                 prepared_data
             )
             logger.info(f"✅ Successfully upserted {len(prepared_data)} records to Supabase")
