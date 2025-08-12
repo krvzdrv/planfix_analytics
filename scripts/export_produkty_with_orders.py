@@ -721,19 +721,18 @@ def parse_analytics_data(xml_text, task, action):
             
             logger.info(f"Collected field data: {field_data}")
             
-            # Создаем запись для Supabase
+            # Создаем запись для Supabase с правильными названиями полей
             record = {
                 'task_id': task['id'],
                 'task_name': task.get('name', ''),
                 'action_id': action.get('id'),
-                'action_text': action.get('text', ''),
-                'action_datetime': action.get('dateTime', ''),
                 'analytic_key': key,
                 'nazwa': field_data.get('27719', {}).get('value', ''),
+                'nazwa_handbook_id': field_data.get('27719', {}).get('valueId', ''),
                 'cena': convert_polish_number(field_data.get('27721', {}).get('value', '')),
                 'waluta': field_data.get('29133', {}).get('value', ''),
                 'ilosc': convert_polish_number(field_data.get('28079', {}).get('value', '')),
-                'rabat_percent': convert_polish_number(field_data.get('28109', {}).get('value', '')),
+                'rabat_procent': convert_polish_number(field_data.get('28109', {}).get('value', '')),
                 'cena_po_rabacie': convert_polish_number(field_data.get('28111', {}).get('value', '')),
                 'wartosc_netto': convert_polish_number(field_data.get('28081', {}).get('value', '')),
                 'prowizja_pln': convert_polish_number(field_data.get('29311', {}).get('value', '')),
@@ -867,22 +866,19 @@ def export_produkty_with_orders():
         # Обновляем данные в Supabase
         logger.info("Starting Supabase upsert...")
         try:
-            # Используем существующие колонки для upsert
-            # Поскольку 'id' - автоинкрементный, используем комбинацию существующих полей
-            unique_columns = ['task_id', 'planfix_analytic_id', 'planfix_item_id']
+            # Создаем составной ключ для каждой записи
+            logger.info("Creating composite keys for upsert...")
             
-            logger.info(f"Using composite unique key from existing columns: {unique_columns}")
-            
-            # Создаем составной ключ из существующих полей
             for record in prepared_data:
-                # Используем существующие поля для составного ключа
-                record['composite_key'] = f"{record.get('task_id', '')}_{record.get('planfix_analytic_id', record.get('analytic_key', ''))}_{record.get('planfix_item_id', record.get('action_id', ''))}"
+                # Создаем составной ключ: task_id_action_id_analytic_key
+                record['composite_key'] = f"{record.get('task_id', '')}_{record.get('action_id', '')}_{record.get('analytic_key', '')}"
+                logger.debug(f"Created composite key: {record['composite_key']}")
             
             # Используем составной ключ для upsert
             planfix_utils.upsert_data_to_supabase(
                 conn,
                 PRODUKTY_TABLE_NAME,
-                'composite_key',  # Используем поле, которое мы создаем
+                'composite_key',  # Primary key для upsert
                 table_columns + ['composite_key'],  # Добавляем составной ключ
                 prepared_data
             )
