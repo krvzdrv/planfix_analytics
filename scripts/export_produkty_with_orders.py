@@ -833,24 +833,38 @@ def export_produkty_with_orders():
             prepared_data.append(prepared_record)
         
         # Обновляем данные в Supabase
-        planfix_utils.upsert_data_to_supabase(
-            conn,
-            PRODUKTY_TABLE_NAME,
-            'id',
-            table_columns,
-            prepared_data
-        )
+        logger.info("Starting Supabase upsert...")
+        try:
+            planfix_utils.upsert_data_to_supabase(
+                conn,
+                PRODUKTY_TABLE_NAME,
+                'analytic_key',  # Primary key для upsert
+                table_columns,
+                prepared_data
+            )
+            logger.info(f"✅ Successfully upserted {len(prepared_data)} records to Supabase")
+        except Exception as e:
+            logger.error(f"❌ Error during Supabase upsert: {e}")
+            raise
         
-        # Получаем список всех ID для пометки удаленных записей
-        all_ids = [item['id'] for item in prepared_data if item.get('id')]
+        # Получаем список всех ключей для пометки удаленных записей
+        all_keys = [item['analytic_key'] for item in prepared_data if item.get('analytic_key')]
         
         # Помечаем записи как удаленные
-        planfix_utils.mark_items_as_deleted_in_supabase(
-            conn,
-            PRODUKTY_TABLE_NAME,
-            'id',
-            all_ids
-        )
+        if all_keys:
+            logger.info("Marking old records as deleted...")
+            try:
+                planfix_utils.mark_items_as_deleted_in_supabase(
+                    conn,
+                    PRODUKTY_TABLE_NAME,
+                    'analytic_key',
+                    all_keys
+                )
+                logger.info("✅ Successfully marked old records as deleted")
+            except Exception as e:
+                logger.error(f"❌ Error marking records as deleted: {e}")
+        else:
+            logger.warning("⚠️ No analytic keys found for deletion marking")
         
         logger.info("--- Produkty Analytics Export with Orders finished successfully ---")
         
@@ -865,9 +879,9 @@ def export_produkty_with_orders():
         # Показываем примеры заказов
         if all_analytics_data:
             print(f"\n=== Примеры заказов ===")
-            order_numbers = set(item['order_number'] for item in all_analytics_data if item.get('order_number'))
-            for order_num in list(order_numbers)[:5]:  # Показываем первые 5
-                print(f"Заказ: {order_num}")
+            task_ids = set(item['task_id'] for item in all_analytics_data if item.get('task_id'))
+            for task_id in list(task_ids)[:5]:  # Показываем первые 5
+                print(f"Заказ (Task ID): {task_id}")
 
     except Exception as e:
         logger.critical(f"An error occurred during export: {e}", exc_info=True)
