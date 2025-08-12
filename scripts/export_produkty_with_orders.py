@@ -11,6 +11,7 @@ from datetime import datetime
 import xml.etree.ElementTree as ET
 import requests
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -85,37 +86,49 @@ def get_tasks_with_produkty_analytics():
             logger.info("No orders found with template 2420917")
             return []
         
-        logger.info(f"Found {len(tasks)} orders, checking for Produkty analytics...")
+        logger.info(f"Found {len(tasks)} orders, checking for Produkty analytics in actions...")
         
-        # Фильтруем задачи, которые имеют аналитику "Produkty"
+        # Фильтруем задачи, которые имеют аналитику "Produkty" в действиях
         tasks_with_analytics = []
         
         for task in tasks[:20]:  # Проверяем первые 20 заказов
             try:
                 task_id = task['id']
-                logger.info(f"Checking order {task_id} for Produkty analytics...")
+                logger.info(f"Checking order {task_id} for Produkty analytics in actions...")
                 
-                # Получаем детали задачи
-                task_details_xml = get_task_details(task_id)
-                task_info = parse_task_details(task_details_xml)
+                # Получаем список действий в задаче
+                actions_xml = get_task_actions(task_id)
+                actions = parse_task_actions(actions_xml)
                 
-                # Логируем детали задачи для отладки
-                logger.info(f"Order {task_id} details: {task_info}")
+                logger.info(f"Order {task_id} has {len(actions)} actions")
                 
-                # Проверяем, есть ли аналитика "Produkty"
-                if has_produkty_analytics(task_details_xml):
-                    logger.info(f"Order {task_id} has Produkty analytics")
+                # Проверяем каждое действие на наличие аналитики "Produkty"
+                has_produkty = False
+                for action in actions:
+                    action_id = action.get('id')
+                    if action_id:
+                        logger.info(f"  Checking action {action_id} for Produkty analytics...")
+                        
+                        # Получаем детали действия
+                        action_details_xml = get_action_details(action_id)
+                        if has_produkty_analytics_in_action(action_details_xml):
+                            logger.info(f"  ✅ Action {action_id} has Produkty analytics!")
+                            has_produkty = True
+                            break
+                        else:
+                            logger.info(f"  ❌ Action {action_id} does not have Produkty analytics")
+                
+                if has_produkty:
+                    logger.info(f"Order {task_id} has Produkty analytics in actions")
                     tasks_with_analytics.append(task)
                 else:
-                    logger.info(f"Order {task_id} does not have Produkty analytics")
-                    # Логируем XML для отладки
-                    logger.debug(f"Order {task_id} XML preview: {task_details_xml[:1000]}...")
+                    logger.info(f"Order {task_id} does not have Produkty analytics in any action")
                     
             except Exception as e:
                 logger.warning(f"Error checking order {task_id}: {e}")
                 continue
         
-        logger.info(f"Found {len(tasks_with_analytics)} orders with Produkty analytics")
+        logger.info(f"Found {len(tasks_with_analytics)} orders with Produkty analytics in actions")
         return tasks_with_analytics
         
     except Exception as e:
@@ -373,6 +386,295 @@ def clean_field_name(field_name):
     # Приводим к нижнему регистру
     return clean_name.lower()
 
+def get_task_actions(task_id):
+    """
+    Получает список действий в задаче через action.getList
+    """
+    try:
+        headers = {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml'
+        }
+        
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<request method="action.getList">'
+            f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
+            '<task>'
+            f'  <id>{task_id}</id>'
+            '</task>'
+            '<pageCurrent>1</pageCurrent>'
+            '<pageSize>100</pageSize>'
+            '</request>'
+        )
+        
+        response = requests.post(
+            planfix_utils.PLANFIX_API_URL,
+            data=body.encode('utf-8'),
+            headers=headers,
+            auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+        )
+        response.raise_for_status()
+        return response.text
+        
+    except Exception as e:
+        logger.error(f"Error getting actions for task {task_id}: {e}")
+        raise
+
+def parse_task_actions(xml_text):
+    """
+    Парсит список действий из XML ответа action.getList
+    """
+    try:
+        root = ET.fromstring(xml_text)
+        if root.attrib.get("status") == "error":
+            code = root.findtext("code")
+            message = root.findtext("message")
+            logger.error(f"Planfix API error: code={code}, message={message}")
+            return []
+        
+        actions = []
+        for action in root.findall('.//action'):
+            action_id = action.findtext('id')
+            if action_id:
+                actions.append({
+                    'id': int(action_id),
+                    'text': action.findtext('text', ''),
+                    'dateTime': action.findtext('dateTime', ''),
+                    'type': action.findtext('type', '')
+                })
+        
+        return actions
+        
+    except Exception as e:
+        logger.error(f"Error parsing actions XML: {e}")
+        return []
+
+def get_action_details(action_id):
+    """
+    Получает детали действия через action.get
+    """
+    try:
+        headers = {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml'
+        }
+        
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<request method="action.get">'
+            f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
+            '<action>'
+            f'  <id>{action_id}</id>'
+            '</action>'
+            '</request>'
+        )
+        
+        response = requests.post(
+            planfix_utils.PLANFIX_API_URL,
+            data=body.encode('utf-8'),
+            headers=headers,
+            auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+        )
+        response.raise_for_status()
+        return response.text
+        
+    except Exception as e:
+        logger.error(f"Error getting action details for {action_id}: {e}")
+        raise
+
+def has_produkty_analytics_in_action(xml_text):
+    """
+    Проверяет, есть ли аналитика "Produkty" в действии
+    """
+    try:
+        root = ET.fromstring(xml_text)
+        if root.attrib.get("status") == "error":
+            code = root.findtext("code")
+            message = root.findtext("message")
+            logger.error(f"Planfix API error: code={code}, message={message}")
+            return False
+        
+        # Ищем аналитики в действии
+        analytics = root.findall('.//analitic')
+        if not analytics:
+            analytics = root.findall('.//analytics')
+        
+        if not analytics:
+            logger.debug("No analytics found in action")
+            return False
+        
+        logger.info(f"Found {len(analytics)} analytics in action")
+        
+        # Проверяем каждую аналитику
+        for analytic in analytics:
+            analytic_id = analytic.findtext('id')
+            analytic_name = analytic.findtext('name')
+            
+            if analytic_id:
+                logger.info(f"  Analytic ID: {analytic_id}, Name: {analytic_name}")
+                
+                # Проверяем по ID (4867) или по названию ("Produkty")
+                if (analytic_id == "4867" or 
+                    (analytic_name and "produkty" in analytic_name.lower())):
+                    logger.info(f"  ✅ Found Produkty analytics!")
+                    return True
+        
+        logger.info("  ❌ Produkty analytics not found in action")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error checking analytics in action: {e}")
+        return False
+
+def extract_produkty_analytics_data_from_action(action_xml, task, action):
+    """
+    Извлекает данные аналитики "Produkty" из действия
+    """
+    try:
+        root = ET.fromstring(action_xml)
+        if root.attrib.get("status") == "error":
+            code = root.findtext("code")
+            message = root.findtext("message")
+            logger.error(f"Planfix API error: code={code}, message={message}")
+            return []
+        
+        analytics_data = []
+        
+        # Ищем аналитики в действии
+        analytics = root.findall('.//analitic')
+        if not analytics:
+            analytics = root.findall('.//analytics')
+        
+        if not analytics:
+            logger.debug("No analytics found in action")
+            return []
+        
+        logger.info(f"Found {len(analytics)} analytics in action")
+        
+        # Обрабатываем каждую аналитику
+        for analytic in analytics:
+            analytic_id = analytic.findtext('id')
+            analytic_name = analytic.findtext('name')
+            
+            if analytic_id and (analytic_id == "4867" or 
+                               (analytic_name and "produkty" in analytic_name.lower())):
+                
+                logger.info(f"Processing Produkty analytics: ID={analytic_id}, Name={analytic_name}")
+                
+                # Получаем данные аналитики через analitic.getData
+                analytic_data = get_analytics_data(analytic_id)
+                if analytic_data:
+                    parsed_data = parse_analytics_data(analytic_data, task, action)
+                    if parsed_data:
+                        analytics_data.extend(parsed_data)
+                        logger.info(f"Successfully parsed {len(parsed_data)} records from analytics {analytic_id}")
+                    else:
+                        logger.warning(f"No data parsed from analytics {analytic_id}")
+                else:
+                    logger.warning(f"Failed to get data for analytics {analytic_id}")
+        
+        return analytics_data
+        
+    except Exception as e:
+        logger.error(f"Error extracting analytics data from action: {e}")
+        return []
+
+def get_analytics_data(analytic_id):
+    """
+    Получает данные аналитики через analitic.getData
+    """
+    try:
+        headers = {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml'
+        }
+        
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<request method="analitic.getData">'
+            f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
+            '<analiticKeys>'
+            f'  <key>{analytic_id}</key>'
+            '</analiticKeys>'
+            '</request>'
+        )
+        
+        response = requests.post(
+            planfix_utils.PLANFIX_API_URL,
+            data=body.encode('utf-8'),
+            headers=headers,
+            auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+        )
+        response.raise_for_status()
+        return response.text
+        
+    except Exception as e:
+        logger.error(f"Error getting analytics data for {analytic_id}: {e}")
+        return None
+
+def parse_analytics_data(xml_text, task, action):
+    """
+    Парсит данные аналитики из XML ответа analitic.getData
+    """
+    try:
+        root = ET.fromstring(xml_text)
+        if root.attrib.get("status") == "error":
+            code = root.findtext("code")
+            message = root.findtext("message")
+            logger.error(f"Planfix API error: code={code}, message={message}")
+            return []
+        
+        analytics_records = []
+        
+        # Ищем данные аналитики
+        for analitic_data in root.findall('.//analiticData'):
+            key = analitic_data.findtext('key')
+            
+            # Собираем данные полей
+            field_data = {}
+            for item_data in analitic_data.findall('.//itemData'):
+                field_id = item_data.findtext('id')
+                field_name = item_data.findtext('name')
+                field_value = item_data.findtext('value')
+                field_value_id = item_data.findtext('valueId')
+                
+                if field_id:
+                    field_data[field_id] = {
+                        'name': field_name,
+                        'value': field_value,
+                        'valueId': field_value_id
+                    }
+            
+            # Создаем запись для Supabase
+            record = {
+                'task_id': task['id'],
+                'task_name': task.get('name', ''),
+                'action_id': action.get('id'),
+                'action_text': action.get('text', ''),
+                'action_datetime': action.get('dateTime', ''),
+                'analytic_key': key,
+                'nazwa': field_data.get('27719', {}).get('value', ''),
+                'cena': field_data.get('27721', {}).get('value', ''),
+                'waluta': field_data.get('29133', {}).get('value', ''),
+                'ilosc': field_data.get('28079', {}).get('value', ''),
+                'rabat_percent': field_data.get('28109', {}).get('value', ''),
+                'cena_po_rabacie': field_data.get('28111', {}).get('value', ''),
+                'wartosc_netto': field_data.get('28081', {}).get('value', ''),
+                'prowizja_pln': field_data.get('29311', {}).get('value', ''),
+                'laczna_masa_kg': field_data.get('32907', {}).get('value', ''),
+                'updated_at': datetime.now(),
+                'is_deleted': False
+            }
+            
+            analytics_records.append(record)
+        
+        return analytics_records
+        
+    except Exception as e:
+        logger.error(f"Error parsing analytics data: {e}")
+        return []
+
 def export_produkty_with_orders():
     """
     Главная функция экспорта аналитики "Produkty" с привязкой к заказам
@@ -411,25 +713,32 @@ def export_produkty_with_orders():
         # Обрабатываем каждую задачу
         for task in tasks:
             task_id = task['id']
-            logger.info(f"Processing task ID: {task_id}, Name: {task['name']}")
+            logger.info(f"Processing task ID: {task_id}, Name: {task.get('name', 'Unknown')}")
             
             try:
-                # Получаем детали задачи
-                task_details_xml = get_task_details(task_id)
-                task_info = parse_task_details(task_details_xml)
+                # Получаем список действий в задаче
+                actions_xml = get_task_actions(task_id)
+                actions = parse_task_actions(actions_xml)
                 
-                order_number = task_info.get('order_number', f"TASK_{task_id}")
+                logger.info(f"Task {task_id} has {len(actions)} actions")
                 
-                # Получаем данные аналитики для задачи
-                analytics_xml = get_produkty_analytics_data(task_id)
-                analytics_data = parse_produkty_analytics_data(analytics_xml, task_id, order_number)
-                
-                if analytics_data:
-                    logger.info(f"Found {len(analytics_data)} analytics records for task {task_id}")
-                    all_analytics_data.extend(analytics_data)
-                else:
-                    logger.warning(f"No analytics data found for task {task_id}")
-                
+                # Ищем аналитику "Produkty" в действиях
+                for action in actions:
+                    action_id = action.get('id')
+                    if action_id:
+                        logger.info(f"  Processing action {action_id} for Produkty analytics data...")
+                        
+                        # Получаем детали действия
+                        action_details_xml = get_action_details(action_id)
+                        
+                        # Извлекаем данные аналитики "Produkty" из действия
+                        analytics_data = extract_produkty_analytics_data_from_action(action_details_xml, task, action)
+                        if analytics_data:
+                            all_analytics_data.extend(analytics_data)
+                            logger.info(f"  ✅ Extracted {len(analytics_data)} analytics records from action {action_id}")
+                        else:
+                            logger.info(f"  ❌ No Produkty analytics data found in action {action_id}")
+                    
             except Exception as e:
                 logger.error(f"Error processing task {task_id}: {e}")
                 continue
