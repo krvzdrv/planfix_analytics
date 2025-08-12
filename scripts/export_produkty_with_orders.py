@@ -867,10 +867,15 @@ def export_produkty_with_orders():
         # Обновляем данные в Supabase
         logger.info("Starting Supabase upsert...")
         try:
+            # Временно используем 'id' как primary key, пока не узнаем правильную структуру
+            primary_key_column = 'id'  # TODO: заменить на правильный primary key после проверки структуры таблицы
+            
+            logger.info(f"Using '{primary_key_column}' as primary key for upsert")
+            
             planfix_utils.upsert_data_to_supabase(
                 conn,
                 PRODUKTY_TABLE_NAME,
-                'analytic_key',  # Primary key для upsert
+                primary_key_column,
                 table_columns,
                 prepared_data
             )
