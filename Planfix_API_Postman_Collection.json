@@ -1,0 +1,228 @@
+{
+	"info": {
+		"_postman_id": "planfix-api-collection",
+		"name": "Planfix API - Analytics",
+		"description": "Коллекция для работы с API Planfix, получения аналитик и их данных",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Get Actions List",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/xml"
+					},
+					{
+						"key": "Accept",
+						"value": "application/xml"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<request method=\"action.getList\">\n    <account>{{PLANFIX_ACCOUNT}}</account>\n    <auth>\n        <key>{{PLANFIX_API_KEY}}</key>\n        <user_token>{{PLANFIX_TOKEN}}</user_token>\n    </auth>\n    <pageCurrent>1</pageCurrent>\n    <pageSize>100</pageSize>\n</request>"
+				},
+				"url": {
+					"raw": "https://api.planfix.com/xml/",
+					"protocol": "https",
+					"host": [
+						"api",
+						"planfix",
+						"com"
+					],
+					"path": [
+						"xml",
+						""
+					]
+				},
+				"description": "Получает список всех действий из Planfix"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Action Details",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/xml"
+					},
+					{
+						"key": "Accept",
+						"value": "application/xml"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<request method=\"action.get\">\n    <account>{{PLANFIX_ACCOUNT}}</account>\n    <auth>\n        <key>{{PLANFIX_API_KEY}}</key>\n        <user_token>{{PLANFIX_TOKEN}}</user_token>\n    </auth>\n    <action>\n        <id>{{ACTION_ID}}</id>\n    </action>\n</request>"
+				},
+				"url": {
+					"raw": "https://api.planfix.com/xml/",
+					"protocol": "https",
+					"host": [
+						"api",
+						"planfix",
+						"com"
+					],
+					"path": [
+						"xml",
+						""
+					]
+				},
+				"description": "Получает детали конкретного действия и список прикрепленных аналитик"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Analytics Data",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/xml"
+					},
+					{
+						"key": "Accept",
+						"value": "application/xml"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<request method=\"analitic.getData\">\n    <account>{{PLANFIX_ACCOUNT}}</account>\n    <auth>\n        <key>{{PLANFIX_API_KEY}}</key>\n        <user_token>{{PLANFIX_TOKEN}}</user_token>\n    </auth>\n    <analiticKeys>\n        <key>{{ANALYTIC_KEY_1}}</key>\n        <key>{{ANALYTIC_KEY_2}}</key>\n    </analiticKeys>\n</request>"
+				},
+				"url": {
+					"raw": "https://api.planfix.com/xml/",
+					"protocol": "https",
+					"host": [
+						"api",
+						"planfix",
+						"com"
+					],
+					"path": [
+						"xml",
+						""
+					]
+				},
+				"description": "Получает данные аналитик по их ключам"
+			},
+			"response": []
+		},
+		{
+			"name": "Search Actions by Name",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/xml"
+					},
+					{
+						"key": "Accept",
+						"value": "application/xml"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<request method=\"action.getList\">\n    <account>{{PLANFIX_ACCOUNT}}</account>\n    <auth>\n        <key>{{PLANFIX_API_KEY}}</key>\n        <user_token>{{PLANFIX_TOKEN}}</user_token>\n    </auth>\n    <pageCurrent>1</pageCurrent>\n    <pageSize>100</pageSize>\n    <search>\n        <text>{{SEARCH_TEXT}}</text>\n    </search>\n</request>"
+				},
+				"url": {
+					"raw": "https://api.planfix.com/xml/",
+					"protocol": "https",
+					"host": [
+						"api",
+						"planfix",
+						"com"
+					],
+					"path": [
+						"xml",
+						""
+					]
+				},
+				"description": "Поиск действий по названию (например, 'Produkty' или 'Продукты')"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Produkty Analytics Structure",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/xml"
+					},
+					{
+						"key": "Accept",
+						"value": "application/xml"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<request method=\"analitic.getData\">\n    <account>{{PLANFIX_ACCOUNT}}</account>\n    <auth>\n        <key>{{PLANFIX_API_KEY}}</key>\n        <user_token>{{PLANFIX_TOKEN}}</user_token>\n    </auth>\n    <analiticKeys>\n        <key>{{PRODUKTY_ANALYTIC_KEY}}</key>\n    </analiticKeys>\n</request>"
+				},
+				"url": {
+					"raw": "https://api.planfix.com/xml/",
+					"protocol": "https",
+					"host": [
+						"api",
+						"planfix",
+						"com"
+					],
+					"path": [
+						"xml",
+						""
+					]
+				},
+				"description": "Получает структуру данных аналитики 'Produkty' по её ключу"
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "PLANFIX_ACCOUNT",
+			"value": "your_account_name",
+			"type": "string"
+		},
+		{
+			"key": "PLANFIX_API_KEY",
+			"value": "your_api_key",
+			"type": "string"
+		},
+		{
+			"key": "PLANFIX_TOKEN",
+			"value": "your_user_token",
+			"type": "string"
+		},
+		{
+			"key": "ACTION_ID",
+			"value": "12345",
+			"type": "string"
+		},
+		{
+			"key": "ANALYTIC_KEY_1",
+			"value": "67890",
+			"type": "string"
+		},
+		{
+			"key": "ANALYTIC_KEY_2",
+			"value": "11111",
+			"type": "string"
+		},
+		{
+			"key": "SEARCH_TEXT",
+			"value": "Produkty",
+			"type": "string"
+		},
+		{
+			"key": "PRODUKTY_ANALYTIC_KEY",
+			"value": "12345",
+			"type": "string",
+			"description": "Ключ аналитики 'Produkty' из Planfix"
+		}
+	]
+}

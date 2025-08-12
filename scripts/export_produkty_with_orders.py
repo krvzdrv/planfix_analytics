@@ -1,0 +1,380 @@
+#!/usr/bin/env python3
+"""
+Скрипт для экспорта аналитики "Produkty" из Planfix в Supabase с привязкой к заказам.
+Получает данные аналитики и связывает их с задачами (заказами).
+"""
+
+import os
+import sys
+import logging
+from datetime import datetime
+import xml.etree.ElementTree as ET
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import scripts.planfix_utils as planfix_utils
+
+logger = logging.getLogger(__name__)
+
+# Конфигурация
+PRODUKTY_ANALYTIC_KEY = 4867  # ID аналитики "Produkty"
+PRODUKTY_TABLE_NAME = "planfix_analytics_produkty"
+
+def get_tasks_with_produkty_analytics():
+    """
+    Получает список задач (заказов) с прикрепленной аналитикой "Produkty"
+    """
+    try:
+        # Получаем список задач с аналитикой
+        params = {
+            'pageCurrent': 1,
+            'pageSize': 100,
+            'analiticKeys': {
+                'key': PRODUKTY_ANALYTIC_KEY
+            }
+        }
+        
+        logger.info("Fetching tasks with Produkty analytics...")
+        response_xml = planfix_utils.make_planfix_request('task.getList', params)
+        return response_xml
+        
+    except Exception as e:
+        logger.error(f"Error getting tasks with analytics: {e}")
+        raise
+
+def get_task_details(task_id):
+    """
+    Получает детали задачи (заказа) с аналитикой
+    """
+    try:
+        params = {
+            'task': {
+                'id': task_id
+            }
+        }
+        
+        logger.info(f"Fetching task details for ID: {task_id}")
+        response_xml = planfix_utils.make_planfix_request('task.get', params)
+        return response_xml
+        
+    except Exception as e:
+        logger.error(f"Error getting task details for ID {task_id}: {e}")
+        raise
+
+def get_produkty_analytics_data(task_id):
+    """
+    Получает данные аналитики "Produkty" для конкретной задачи
+    """
+    try:
+        params = {
+            'analiticKeys': {
+                'key': PRODUKTY_ANALYTIC_KEY
+            },
+            'taskId': task_id
+        }
+        
+        logger.info(f"Fetching Produkty analytics data for task ID: {task_id}")
+        response_xml = planfix_utils.make_planfix_request('analitic.getData', params)
+        return response_xml
+        
+    except Exception as e:
+        logger.error(f"Error getting analytics data for task ID {task_id}: {e}")
+        raise
+
+def parse_task_list(xml_text):
+    """
+    Парсит список задач с аналитикой
+    """
+    try:
+        root = ET.fromstring(xml_text)
+        if root.attrib.get("status") == "error":
+            code = root.findtext("code")
+            message = root.findtext("message")
+            logger.error(f"Planfix API error: code={code}, message={message}")
+            return []
+        
+        tasks = []
+        for task in root.findall('.//task'):
+            task_id = task.findtext('id')
+            name = task.findtext('name')
+            number = task.findtext('number')
+            
+            if task_id:
+                tasks.append({
+                    'id': int(task_id),
+                    'name': name,
+                    'number': number
+                })
+        
+        return tasks
+        
+    except ET.ParseError as e:
+        logger.error(f"XML ParseError: {e}")
+        raise
+
+def parse_task_details(xml_text):
+    """
+    Парсит детали задачи
+    """
+    try:
+        root = ET.fromstring(xml_text)
+        if root.attrib.get("status") == "error":
+            code = root.findtext("code")
+            message = root.findtext("message")
+            logger.error(f"Planfix API error: code={code}, message={message}")
+            return {}
+        
+        task_info = {}
+        
+        # Получаем номер заказа
+        number = root.findtext('.//task/number')
+        if number:
+            task_info['order_number'] = number
+        
+        # Получаем название задачи
+        name = root.findtext('.//task/name')
+        if name:
+            task_info['task_name'] = name
+        
+        return task_info
+        
+    except ET.ParseError as e:
+        logger.error(f"XML ParseError: {e}")
+        raise
+
+def parse_produkty_analytics_data(xml_text, task_id, order_number):
+    """
+    Парсит данные аналитики "Produkty" для конкретной задачи
+    """
+    try:
+        root = ET.fromstring(xml_text)
+        if root.attrib.get("status") == "error":
+            code = root.findtext("code")
+            message = root.findtext("message")
+            logger.error(f"Planfix API error: code={code}, message={message}")
+            return []
+        
+        analytics_data = []
+        
+        # Парсим analiticDatas
+        for analitic_data in root.findall('.//analiticData'):
+            key = analitic_data.findtext('key')
+            if key is None:
+                continue
+            
+            # Парсим itemData для каждой записи аналитики
+            for item_data in analitic_data.findall('.//itemData'):
+                item_id = item_data.findtext('id')
+                name = item_data.findtext('name')
+                value = item_data.findtext('value')
+                value_id = item_data.findtext('valueId')
+                
+                # Создаем уникальный ID для записи
+                record_id = f"{key}_{task_id}_{item_id}" if item_id else f"{key}_{task_id}_{len(analytics_data)}"
+                
+                # Создаем базовую структуру записи
+                record = {
+                    'id': record_id,
+                    'planfix_analytic_id': int(key) if key else None,
+                    'planfix_item_id': int(item_id) if item_id else None,
+                    'task_id': task_id,
+                    'order_number': order_number,
+                    'updated_at': datetime.now(),
+                    'is_deleted': False
+                }
+                
+                # Добавляем поля аналитики на основе названия
+                if name:
+                    clean_name = clean_field_name(name)
+                    record[clean_name] = value
+                    
+                    # Если есть value_id, добавляем отдельную колонку
+                    if value_id:
+                        record[f"{clean_name}_handbook_id"] = value_id
+                
+                analytics_data.append(record)
+        
+        return analytics_data
+        
+    except ET.ParseError as e:
+        logger.error(f"XML ParseError: {e}")
+        raise
+
+def clean_field_name(field_name):
+    """
+    Очищает название поля для использования в SQL
+    """
+    # Заменяем польские символы и специальные символы
+    replacements = {
+        'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
+        'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z',
+        ' ': '_', '-': '_', '.': '_', ',': '_', '%': 'procent'
+    }
+    
+    clean_name = field_name
+    for old, new in replacements.items():
+        clean_name = clean_name.replace(old, new)
+    
+    # Убираем все неалфавитно-цифровые символы
+    clean_name = ''.join(c for c in clean_name if c.isalnum() or c == '_')
+    
+    # Приводим к нижнему регистру
+    return clean_name.lower()
+
+def export_produkty_with_orders():
+    """
+    Главная функция экспорта аналитики "Produkty" с привязкой к заказам
+    """
+    logger.info("--- Starting Produkty Analytics Export with Orders ---")
+    
+    # Проверяем обязательные переменные окружения
+    planfix_utils.check_required_env_vars({
+        'PLANFIX_API_KEY': planfix_utils.PLANFIX_API_KEY,
+        'PLANFIX_TOKEN': planfix_utils.PLANFIX_TOKEN,
+        'PLANFIX_ACCOUNT': planfix_utils.PLANFIX_ACCOUNT,
+    })
+
+    conn = None
+    try:
+        # Подключаемся к Supabase
+        conn = planfix_utils.get_supabase_connection()
+        
+        # Получаем список задач с аналитикой "Produkty"
+        logger.info("Getting tasks with Produkty analytics...")
+        tasks_xml = get_tasks_with_produkty_analytics()
+        tasks = parse_task_list(tasks_xml)
+        
+        if not tasks:
+            logger.info("No tasks found with Produkty analytics")
+            return
+        
+        logger.info(f"Found {len(tasks)} tasks with Produkty analytics")
+        
+        all_analytics_data = []
+        
+        # Обрабатываем каждую задачу
+        for task in tasks:
+            task_id = task['id']
+            logger.info(f"Processing task ID: {task_id}, Name: {task['name']}")
+            
+            try:
+                # Получаем детали задачи
+                task_details_xml = get_task_details(task_id)
+                task_info = parse_task_details(task_details_xml)
+                
+                order_number = task_info.get('order_number', f"TASK_{task_id}")
+                
+                # Получаем данные аналитики для задачи
+                analytics_xml = get_produkty_analytics_data(task_id)
+                analytics_data = parse_produkty_analytics_data(analytics_xml, task_id, order_number)
+                
+                if analytics_data:
+                    logger.info(f"Found {len(analytics_data)} analytics records for task {task_id}")
+                    all_analytics_data.extend(analytics_data)
+                else:
+                    logger.warning(f"No analytics data found for task {task_id}")
+                
+            except Exception as e:
+                logger.error(f"Error processing task {task_id}: {e}")
+                continue
+        
+        if not all_analytics_data:
+            logger.info("No analytics data to export")
+            return
+        
+        logger.info(f"Total analytics records to export: {len(all_analytics_data)}")
+        
+        # Получаем структуру таблицы
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT * FROM "{PRODUKTY_TABLE_NAME}" LIMIT 0')
+            table_columns = [desc[0] for desc in cur.description]
+        
+        logger.info(f"Table columns: {table_columns}")
+        
+        # Подготавливаем данные для upsert
+        prepared_data = []
+        for record in all_analytics_data:
+            prepared_record = {}
+            for col in table_columns:
+                if col in record:
+                    prepared_record[col] = record[col]
+                else:
+                    # Устанавливаем значения по умолчанию
+                    if col == 'is_deleted':
+                        prepared_record[col] = False
+                    elif col == 'updated_at':
+                        prepared_record[col] = datetime.now()
+                    else:
+                        prepared_record[col] = None
+            prepared_data.append(prepared_record)
+        
+        # Обновляем данные в Supabase
+        planfix_utils.upsert_data_to_supabase(
+            conn,
+            PRODUKTY_TABLE_NAME,
+            'id',
+            table_columns,
+            prepared_data
+        )
+        
+        # Получаем список всех ID для пометки удаленных записей
+        all_ids = [item['id'] for item in prepared_data if item.get('id')]
+        
+        # Помечаем записи как удаленные
+        planfix_utils.mark_items_as_deleted_in_supabase(
+            conn,
+            PRODUKTY_TABLE_NAME,
+            'id',
+            all_ids
+        )
+        
+        logger.info("--- Produkty Analytics Export with Orders finished successfully ---")
+        
+        # Выводим статистику
+        print(f"\n=== Статистика экспорта ===")
+        print(f"Обработано задач: {len(tasks)}")
+        print(f"Экспортировано записей: {len(all_analytics_data)}")
+        print(f"Таблица: {PRODUKTY_TABLE_NAME}")
+        print(f"Ключ аналитики: {PRODUKTY_ANALYTIC_KEY}")
+        print(f"Время экспорта: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Показываем примеры заказов
+        if all_analytics_data:
+            print(f"\n=== Примеры заказов ===")
+            order_numbers = set(item['order_number'] for item in all_analytics_data if item.get('order_number'))
+            for order_num in list(order_numbers)[:5]:  # Показываем первые 5
+                print(f"Заказ: {order_num}")
+
+    except Exception as e:
+        logger.critical(f"An error occurred during export: {e}", exc_info=True)
+        sys.exit(1)
+    finally:
+        if conn:
+            conn.close()
+            logger.info("Supabase connection closed.")
+
+def main():
+    """
+    Точка входа в программу
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+    
+    try:
+        export_produkty_with_orders()
+    except KeyboardInterrupt:
+        print("\nЭкспорт прерван пользователем")
+        sys.exit(0)
+    except Exception as e:
+        logger.critical(f"Unexpected error: {e}", exc_info=True)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,126 @@
+name: Produkty Analytics Sync
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Каждые 6 часов
+    - cron: '0 2 * * *'    # Ежедневно в 2:00 UTC
+  workflow_dispatch:        # Ручной запуск
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'scripts/export_produkty_with_orders.py'
+      - 'scripts/planfix_utils.py'
+
+jobs:
+  sync-produkty:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Test Planfix connection
+        env:
+          PLANFIX_API_KEY: ${{ secrets.PLANFIX_API_KEY }}
+          PLANFIX_TOKEN: ${{ secrets.PLANFIX_TOKEN }}
+          PLANFIX_ACCOUNT: ${{ secrets.PLANFIX_ACCOUNT }}
+        run: |
+          echo "Testing Planfix API connection..."
+          python -c "
+          import os
+          import sys
+          sys.path.append('scripts')
+          import planfix_utils
+          
+          # Проверяем подключение к Planfix
+          try:
+              params = {'pageCurrent': 1, 'pageSize': 1}
+              response = planfix_utils.make_planfix_request('analitic.getList', params)
+              print('✅ Planfix API connection successful')
+          except Exception as e:
+              print(f'❌ Planfix API connection failed: {e}')
+              sys.exit(1)
+          "
+          
+      - name: Test Supabase connection
+        env:
+          SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_DB: ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER: ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          SUPABASE_PORT: ${{ secrets.SUPABASE_PORT }}
+        run: |
+          echo "Testing Supabase connection..."
+          python -c "
+          import os
+          import sys
+          sys.path.append('scripts')
+          import planfix_utils
+          
+          # Проверяем подключение к Supabase
+          try:
+              conn = planfix_utils.get_supabase_connection()
+              conn.close()
+              print('✅ Supabase connection successful')
+          except Exception as e:
+              print(f'❌ Supabase connection failed: {e}')
+              sys.exit(1)
+          "
+          
+      - name: Sync Produkty analytics with orders
+        env:
+          SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_DB: ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER: ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          SUPABASE_PORT: ${{ secrets.SUPABASE_PORT }}
+          PLANFIX_API_KEY: ${{ secrets.PLANFIX_API_KEY }}
+          PLANFIX_TOKEN: ${{ secrets.PLANFIX_TOKEN }}
+          PLANFIX_ACCOUNT: ${{ secrets.PLANFIX_ACCOUNT }}
+        run: |
+          echo "Starting Produkty analytics sync..."
+          python scripts/export_produkty_with_orders.py
+          
+      - name: Upload sync logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: produkty-sync-logs
+          path: |
+            *.log
+            sync_*.txt
+            
+      - name: Create sync summary
+        if: always()
+        run: |
+          echo "## 📊 Produkty Analytics Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Sync completed at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow:** ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Produkty analytics sync failed!"
+          echo "Check the logs for details"
+          
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Produkty analytics sync completed successfully!"
+          echo "Data synchronized from Planfix to Supabase"
