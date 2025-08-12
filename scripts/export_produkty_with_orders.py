@@ -9,6 +9,7 @@ import sys
 import logging
 from datetime import datetime
 import xml.etree.ElementTree as ET
+import requests
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -29,14 +30,41 @@ def get_tasks_with_produkty_analytics():
     Получает список задач (заказов) с прикрепленной аналитикой "Produkty"
     """
     try:
-        # Получаем список всех задач без фильтров
-        params = {
-            'pageCurrent': 1,
-            'pageSize': 50  # Уменьшаем количество для начала
+        # Используем правильный подход с ручным формированием XML
+        headers = {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml'
         }
         
-        logger.info("Fetching tasks list...")
-        response_xml = planfix_utils.make_planfix_request('task.getList', params)
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<request method="task.getList">'
+            f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
+            '<pageCurrent>1</pageCurrent>'
+            '<pageSize>50</pageSize>'
+            '<fields>'
+            '  <field>id</field>'
+            '  <field>title</field>'
+            '  <field>description</field>'
+            '  <field>status</field>'
+            '  <field>statusName</field>'
+            '  <field>template</field>'
+            '  <field>client</field>'
+            '  <field>beginDateTime</field>'
+            '</fields>'
+            '</request>'
+        )
+        
+        logger.info("Fetching tasks list with proper XML format...")
+        
+        response = requests.post(
+            planfix_utils.PLANFIX_API_URL,
+            data=body.encode('utf-8'),
+            headers=headers,
+            auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+        )
+        response.raise_for_status()
+        response_xml = response.text
         
         # Логируем ответ для отладки
         logger.info(f"API response length: {len(response_xml)}")
@@ -105,15 +133,31 @@ def get_task_details(task_id):
     Получает детали задачи (заказа) с аналитикой
     """
     try:
-        params = {
-            'task': {
-                'id': task_id
-            }
+        headers = {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml'
         }
         
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<request method="task.get">'
+            f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
+            f'<task>'
+            f'<id>{task_id}</id>'
+            '</task>'
+            '</request>'
+        )
+        
         logger.info(f"Fetching task details for ID: {task_id}")
-        response_xml = planfix_utils.make_planfix_request('task.get', params)
-        return response_xml
+        
+        response = requests.post(
+            planfix_utils.PLANFIX_API_URL,
+            data=body.encode('utf-8'),
+            headers=headers,
+            auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+        )
+        response.raise_for_status()
+        return response.text
         
     except Exception as e:
         logger.error(f"Error getting task details for ID {task_id}: {e}")
@@ -124,16 +168,32 @@ def get_produkty_analytics_data(task_id):
     Получает данные аналитики "Produkty" для конкретной задачи
     """
     try:
-        params = {
-            'analiticKeys': {
-                'key': PRODUKTY_ANALYTIC_KEY
-            },
-            'taskId': task_id
+        headers = {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml'
         }
         
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<request method="analitic.getData">'
+            f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
+            '<analiticKeys>'
+            f'<key>{PRODUKTY_ANALYTIC_KEY}</key>'
+            '</analiticKeys>'
+            f'<taskId>{task_id}</taskId>'
+            '</request>'
+        )
+        
         logger.info(f"Fetching Produkty analytics data for task ID: {task_id}")
-        response_xml = planfix_utils.make_planfix_request('analitic.getData', params)
-        return response_xml
+        
+        response = requests.post(
+            planfix_utils.PLANFIX_API_URL,
+            data=body.encode('utf-8'),
+            headers=headers,
+            auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+        )
+        response.raise_for_status()
+        return response.text
         
     except Exception as e:
         logger.error(f"Error getting analytics data for task ID {task_id}: {e}")
