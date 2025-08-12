@@ -43,7 +43,7 @@ def get_tasks_with_produkty_analytics():
             '<request method="task.getList">'
             f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
             '<pageCurrent>1</pageCurrent>'
-            '<pageSize>50</pageSize>'
+            '<pageSize>100</pageSize>'
             '<filters>'
             '  <filter>'
             '    <type>51</type>'
@@ -60,6 +60,7 @@ def get_tasks_with_produkty_analytics():
             '  <field>template</field>'
             '  <field>client</field>'
             '  <field>beginDateTime</field>'
+            '  <field>customData</field>'  # Добавляем customData для получения номера заказа
             '</fields>'
             '</request>'
         )
@@ -80,18 +81,46 @@ def get_tasks_with_produkty_analytics():
         logger.debug(f"API response preview: {response_xml[:500]}...")
         
         # Парсим список задач
-        tasks = parse_task_list(response_xml)
+        all_tasks = []
+        page = 1
         
-        if not tasks:
+        while True:
+            logger.info(f"Fetching page {page} of orders...")
+            page_tasks = parse_task_list(response_xml)
+            
+            if not page_tasks:
+                logger.info(f"No more orders found on page {page}")
+                break
+                
+            all_tasks.extend(page_tasks)
+            logger.info(f"Found {len(page_tasks)} orders on page {page}")
+            
+            # Если получили меньше задач чем размер страницы, значит это последняя страница
+            if len(page_tasks) < 100:
+                break
+                
+            # Получаем следующую страницу
+            page += 1
+            body = body.replace(f'<pageCurrent>{page-1}</pageCurrent>', f'<pageCurrent>{page}</pageCurrent>')
+            response = requests.post(
+                planfix_utils.PLANFIX_API_URL,
+                data=body.encode('utf-8'),
+                headers=headers,
+                auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+            )
+            response.raise_for_status()
+            response_xml = response.text
+        
+        if not all_tasks:
             logger.info("No orders found with template 2420917")
             return []
         
-        logger.info(f"Found {len(tasks)} orders, checking for Produkty analytics in actions...")
+        logger.info(f"Found {len(all_tasks)} total orders, checking for Produkty analytics in actions...")
         
         # Фильтруем задачи, которые имеют аналитику "Produkty" в действиях
         tasks_with_analytics = []
         
-        for task in tasks[:10]:  # Проверяем первые 10 заказов для экономии API вызовов
+        for task in all_tasks:  # Проверяем ВСЕ заказы для получения максимального количества данных
             try:
                 task_id = task['id']
                 logger.info(f"Checking order {task_id} for Produkty analytics in actions...")
@@ -104,7 +133,7 @@ def get_tasks_with_produkty_analytics():
                 
                 # Проверяем каждое действие на наличие аналитики "Produkty"
                 has_produkty = False
-                for action in actions:
+                for action in actions:  # Проверяем ВСЕ действия в каждой задаче
                     action_id = action.get('id')
                     if action_id:
                         logger.info(f"  Checking action {action_id} for Produkty analytics...")
@@ -248,7 +277,7 @@ def get_produkty_analytics_data(task_id):
 
 def parse_task_list(xml_text):
     """
-    Парсит список задач с аналитикой
+    Парсит список задач с аналитикой и извлекает номер заказа из customData
     """
     try:
         root = ET.fromstring(xml_text)
@@ -264,11 +293,22 @@ def parse_task_list(xml_text):
             name = task.findtext('name')
             number = task.findtext('number')
             
+            # Извлекаем номер заказа из customData
+            order_number = None
+            custom_data_root = task.find('customData')
+            if custom_data_root is not None:
+                for cv in custom_data_root.findall('customValue'):
+                    field_name = cv.findtext('field/name')
+                    if field_name == "Numer zamówienia":
+                        order_number = cv.findtext('value')
+                        break
+            
             if task_id:
                 tasks.append({
                     'id': int(task_id),
                     'name': name,
-                    'number': number
+                    'number': number,
+                    'order_number': order_number
                 })
         
         return tasks
@@ -737,6 +777,7 @@ def parse_analytics_data(xml_text, task, action):
                 'wartosc_netto': convert_polish_number(field_data.get('28081', {}).get('value', '')),
                 'prowizja_pln': convert_polish_number(field_data.get('29311', {}).get('value', '')),
                 'laczna_masa_kg': convert_polish_number(field_data.get('32907', {}).get('value', '')),
+                'order_number': task.get('order_number', ''),  # Используем номер заказа из customData
                 'updated_at': datetime.now(),
                 'is_deleted': False
             }
