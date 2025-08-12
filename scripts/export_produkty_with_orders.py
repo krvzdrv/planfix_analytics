@@ -65,7 +65,7 @@ def get_tasks_with_produkty_analytics():
             '</request>'
         )
         
-        logger.info("Fetching orders (tasks with template 2420917) for Produkty analytics...")
+        logger.info("Fetching ALL orders (tasks with template 2420917) for Produkty analytics...")
         
         response = requests.post(
             planfix_utils.PLANFIX_API_URL,
@@ -86,6 +86,19 @@ def get_tasks_with_produkty_analytics():
         
         while True:
             logger.info(f"Fetching page {page} of orders...")
+            
+            # Обновляем номер страницы в запросе
+            if page > 1:
+                body = body.replace(f'<pageCurrent>{page-1}</pageCurrent>', f'<pageCurrent>{page}</pageCurrent>')
+                response = requests.post(
+                    planfix_utils.PLANFIX_API_URL,
+                    data=body.encode('utf-8'),
+                    headers=headers,
+                    auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+                )
+                response.raise_for_status()
+                response_xml = response.text
+            
             page_tasks = parse_task_list(response_xml)
             
             if not page_tasks:
@@ -97,19 +110,15 @@ def get_tasks_with_produkty_analytics():
             
             # Если получили меньше задач чем размер страницы, значит это последняя страница
             if len(page_tasks) < 100:
+                logger.info(f"Last page reached (got {len(page_tasks)} orders, expected 100)")
                 break
                 
             # Получаем следующую страницу
             page += 1
-            body = body.replace(f'<pageCurrent>{page-1}</pageCurrent>', f'<pageCurrent>{page}</pageCurrent>')
-            response = requests.post(
-                planfix_utils.PLANFIX_API_URL,
-                data=body.encode('utf-8'),
-                headers=headers,
-                auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
-            )
-            response.raise_for_status()
-            response_xml = response.text
+            
+            # Добавляем задержку между страницами для избежания лимитов API
+            logger.info(f"Waiting 1 second before fetching page {page}...")
+            time.sleep(1)
         
         if not all_tasks:
             logger.info("No orders found with template 2420917")
