@@ -67,14 +67,37 @@ def get_tasks_with_produkty_analytics():
         
         logger.info("Fetching ALL orders (tasks with template 2420917) for Produkty analytics...")
         
-        response = requests.post(
-            planfix_utils.PLANFIX_API_URL,
-            data=body.encode('utf-8'),
-            headers=headers,
-            auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
-        )
-        response.raise_for_status()
-        response_xml = response.text
+        # Добавляем задержку перед первым запросом
+        logger.info("Waiting 2 seconds before first API call to avoid rate limits...")
+        time.sleep(2)
+        
+        # Делаем запрос с повторными попытками при ошибках лимитов
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                response = requests.post(
+                    planfix_utils.PLANFIX_API_URL,
+                    data=body.encode('utf-8'),
+                    headers=headers,
+                    auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
+                )
+                response.raise_for_status()
+                response_xml = response.text
+                break
+            except Exception as e:
+                retry_count += 1
+                if "limit" in str(e).lower() or retry_count < max_retries:
+                    logger.warning(f"API limit error on first request, retry {retry_count}/{max_retries}")
+                    logger.info(f"Waiting 10 seconds before retry...")
+                    time.sleep(10)
+                    continue
+                else:
+                    logger.error(f"Failed to get first page after {max_retries} retries: {e}")
+                    raise
+        
+        logger.info(f"Successfully got first page, response length: {len(response_xml)}")
         
         # Логируем ответ для отладки
         logger.info(f"API response length: {len(response_xml)}")
@@ -83,6 +106,7 @@ def get_tasks_with_produkty_analytics():
         # Парсим список задач
         all_tasks = []
         page = 1
+        max_retries = 3
         
         while True:
             logger.info(f"Fetching page {page} of orders...")
@@ -90,6 +114,11 @@ def get_tasks_with_produkty_analytics():
             # Обновляем номер страницы в запросе
             if page > 1:
                 body = body.replace(f'<pageCurrent>{page-1}</pageCurrent>', f'<pageCurrent>{page}</pageCurrent>')
+                
+                # Добавляем задержку перед каждым запросом страницы
+                logger.info(f"Waiting 3 seconds before fetching page {page}...")
+                time.sleep(3)
+                
                 response = requests.post(
                     planfix_utils.PLANFIX_API_URL,
                     data=body.encode('utf-8'),
@@ -99,7 +128,24 @@ def get_tasks_with_produkty_analytics():
                 response.raise_for_status()
                 response_xml = response.text
             
-            page_tasks = parse_task_list(response_xml)
+            # Парсим задачи с повторными попытками при ошибках лимитов
+            page_tasks = []
+            retry_count = 0
+            
+            while retry_count < max_retries:
+                try:
+                    page_tasks = parse_task_list(response_xml)
+                    break
+                except Exception as e:
+                    retry_count += 1
+                    if "limit" in str(e).lower() or retry_count < max_retries:
+                        logger.warning(f"API limit error on page {page}, retry {retry_count}/{max_retries}")
+                        logger.info(f"Waiting 5 seconds before retry...")
+                        time.sleep(5)
+                        continue
+                    else:
+                        logger.error(f"Failed to parse page {page} after {max_retries} retries: {e}")
+                        break
             
             if not page_tasks:
                 logger.info(f"No more orders found on page {page}")
@@ -115,10 +161,6 @@ def get_tasks_with_produkty_analytics():
                 
             # Получаем следующую страницу
             page += 1
-            
-            # Добавляем задержку между страницами для избежания лимитов API
-            logger.info(f"Waiting 1 second before fetching page {page}...")
-            time.sleep(1)
         
         if not all_tasks:
             logger.info("No orders found with template 2420917")
