@@ -556,27 +556,32 @@ def extract_produkty_analytics_data_from_action(action_xml, task, action):
         for analytic in analytics:
             analytic_id = analytic.findtext('id')
             analytic_name = analytic.findtext('name')
+            analytic_key = analytic.findtext('key')  # Ключ строки данных!
             
             if analytic_id and (analytic_id == "4867" or 
                                (analytic_name and "produkty" in analytic_name.lower())):
                 
-                logger.info(f"Processing Produkty analytics: ID={analytic_id}, Name={analytic_name}")
+                logger.info(f"Processing Produkty analytics: ID={analytic_id}, Name={analytic_name}, Key={analytic_key}")
                 
-                # Получаем данные аналитики через analitic.getData
-                logger.info(f"Requesting data for analytics {analytic_id}...")
-                analytic_data = get_analytics_data(analytic_id)
+                if not analytic_key:
+                    logger.warning(f"❌ No key found for analytics {analytic_id} - cannot get data")
+                    continue
+                
+                # Получаем данные аналитики через analitic.getData используя КЛЮЧ
+                logger.info(f"Requesting data for analytics key {analytic_key}...")
+                analytic_data = get_analytics_data(analytic_key)
                 if analytic_data:
-                    logger.info(f"✅ Got analytics data for {analytic_id}, length: {len(analytic_data)}")
+                    logger.info(f"✅ Got analytics data for key {analytic_key}, length: {len(analytic_data)}")
                     logger.info(f"Parsing analytics data...")
                     parsed_data = parse_analytics_data(analytic_data, task, action)
                     if parsed_data:
                         analytics_data.extend(parsed_data)
-                        logger.info(f"✅ Successfully parsed {len(parsed_data)} records from analytics {analytic_id}")
+                        logger.info(f"✅ Successfully parsed {len(parsed_data)} records from analytics key {analytic_key}")
                     else:
-                        logger.warning(f"❌ No data parsed from analytics {analytic_id}")
+                        logger.warning(f"❌ No data parsed from analytics key {analytic_key}")
                         logger.warning(f"This means the XML structure is different than expected")
                 else:
-                    logger.warning(f"❌ Failed to get data for analytics {analytic_id}")
+                    logger.warning(f"❌ Failed to get data for analytics key {analytic_key}")
                     logger.warning(f"This means analitic.getData returned empty or error response")
         
         return analytics_data
@@ -585,9 +590,9 @@ def extract_produkty_analytics_data_from_action(action_xml, task, action):
         logger.error(f"Error extracting analytics data from action: {e}")
         return []
 
-def get_analytics_data(analytic_id):
+def get_analytics_data(analytic_key):
     """
-    Получает данные аналитики через analitic.getData
+    Получает данные аналитики через analitic.getData используя ключ строки данных
     """
     try:
         headers = {
@@ -600,12 +605,12 @@ def get_analytics_data(analytic_id):
             '<request method="analitic.getData">'
             f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
             '<analiticKeys>'
-            f'  <key>{analytic_id}</key>'
+            f'  <key>{analytic_key}</key>'
             '</analiticKeys>'
             '</request>'
         )
         
-        logger.info(f"Requesting analytics data for ID {analytic_id}...")
+        logger.info(f"Requesting analytics data for key {analytic_key}...")
         logger.debug(f"Request body: {body}")
         
         response = requests.post(
@@ -624,7 +629,7 @@ def get_analytics_data(analytic_id):
         return response_text
         
     except Exception as e:
-        logger.error(f"Error getting analytics data for {analytic_id}: {e}")
+        logger.error(f"Error getting analytics data for key {analytic_key}: {e}")
         return None
 
 def parse_analytics_data(xml_text, task, action):
