@@ -846,11 +846,15 @@ def export_produkty_with_orders():
         
         logger.info(f"Table columns: {table_columns}")
         
+        # Исключаем поле 'id' из upsert (оно автоинкрементное)
+        upsert_columns = [col for col in table_columns if col != 'id']
+        logger.info(f"Upsert columns (excluding 'id'): {upsert_columns}")
+        
         # Подготавливаем данные для upsert
         prepared_data = []
         for record in all_analytics_data:
             prepared_record = {}
-            for col in table_columns:
+            for col in upsert_columns:  # Используем колонки без 'id'
                 if col in record:
                     prepared_record[col] = record[col]
                 else:
@@ -879,7 +883,7 @@ def export_produkty_with_orders():
                 conn,
                 PRODUKTY_TABLE_NAME,
                 'composite_key',  # Primary key для upsert
-                table_columns,  # Используем существующие колонки (composite_key уже там)
+                upsert_columns,  # Используем колонки без 'id'
                 prepared_data
             )
             logger.info(f"✅ Successfully upserted {len(prepared_data)} records to Supabase")
