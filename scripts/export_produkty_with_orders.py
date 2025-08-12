@@ -31,6 +31,7 @@ def get_tasks_with_produkty_analytics():
     """
     try:
         # Используем правильный подход с ручным формированием XML
+        # Ищем только задачи-заказы по шаблону 2420917
         headers = {
             'Content-Type': 'application/xml',
             'Accept': 'application/xml'
@@ -42,6 +43,13 @@ def get_tasks_with_produkty_analytics():
             f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
             '<pageCurrent>1</pageCurrent>'
             '<pageSize>50</pageSize>'
+            '<filters>'
+            '  <filter>'
+            '    <type>51</type>'
+            '    <operator>equal</operator>'
+            '    <value>2420917</value>'
+            '  </filter>'
+            '</filters>'
             '<fields>'
             '  <field>id</field>'
             '  <field>title</field>'
@@ -55,7 +63,7 @@ def get_tasks_with_produkty_analytics():
             '</request>'
         )
         
-        logger.info("Fetching tasks list with proper XML format...")
+        logger.info("Fetching orders (tasks with template 2420917) for Produkty analytics...")
         
         response = requests.post(
             planfix_utils.PLANFIX_API_URL,
@@ -74,44 +82,44 @@ def get_tasks_with_produkty_analytics():
         tasks = parse_task_list(response_xml)
         
         if not tasks:
-            logger.info("No tasks found")
+            logger.info("No orders found with template 2420917")
             return []
         
-        logger.info(f"Found {len(tasks)} tasks, checking for Produkty analytics...")
+        logger.info(f"Found {len(tasks)} orders, checking for Produkty analytics...")
         
         # Фильтруем задачи, которые имеют аналитику "Produkty"
         tasks_with_analytics = []
         
-        for task in tasks[:10]:  # Проверяем первые 10 задач для экономии API вызовов
+        for task in tasks[:20]:  # Проверяем первые 20 заказов
             try:
                 task_id = task['id']
-                logger.info(f"Checking task {task_id} for Produkty analytics...")
+                logger.info(f"Checking order {task_id} for Produkty analytics...")
                 
                 # Получаем детали задачи
                 task_details_xml = get_task_details(task_id)
                 task_info = parse_task_details(task_details_xml)
                 
                 # Логируем детали задачи для отладки
-                logger.info(f"Task {task_id} details: {task_info}")
+                logger.info(f"Order {task_id} details: {task_info}")
                 
                 # Проверяем, есть ли аналитика "Produkty"
                 if has_produkty_analytics(task_details_xml):
-                    logger.info(f"Task {task_id} has Produkty analytics")
+                    logger.info(f"Order {task_id} has Produkty analytics")
                     tasks_with_analytics.append(task)
                 else:
-                    logger.info(f"Task {task_id} does not have Produkty analytics")
+                    logger.info(f"Order {task_id} does not have Produkty analytics")
                     # Логируем XML для отладки
-                    logger.debug(f"Task {task_id} XML preview: {task_details_xml[:1000]}...")
+                    logger.debug(f"Order {task_id} XML preview: {task_details_xml[:1000]}...")
                     
             except Exception as e:
-                logger.warning(f"Error checking task {task_id}: {e}")
+                logger.warning(f"Error checking order {task_id}: {e}")
                 continue
         
-        logger.info(f"Found {len(tasks_with_analytics)} tasks with Produkty analytics")
+        logger.info(f"Found {len(tasks_with_analytics)} orders with Produkty analytics")
         return tasks_with_analytics
         
     except Exception as e:
-        logger.error(f"Error getting tasks with analytics: {e}")
+        logger.error(f"Error getting orders with analytics: {e}")
         raise
 
 def has_produkty_analytics(task_xml):
@@ -383,16 +391,17 @@ def export_produkty_with_orders():
         # Подключаемся к Supabase
         conn = planfix_utils.get_supabase_connection()
         
-        # Получаем список задач с аналитикой "Produkty"
-        logger.info("Getting tasks with Produkty analytics...")
+        # Получаем список заказов с аналитикой "Produkty"
+        logger.info("Getting orders with Produkty analytics...")
         tasks = get_tasks_with_produkty_analytics()
         
         if not tasks:
-            logger.info("No tasks found with Produkty analytics")
+            logger.info("No orders found with Produkty analytics")
             logger.info("This might mean:")
-            logger.info("1. No tasks have Produkty analytics attached")
-            logger.info("2. All tasks are in different statuses")
+            logger.info("1. No orders have Produkty analytics attached")
+            logger.info("2. Orders template ID might be incorrect")
             logger.info("3. Produkty analytics ID might be incorrect")
+            logger.info("4. Analytics might be attached to different objects")
             return
         
         logger.info(f"Found {len(tasks)} tasks with Produkty analytics")
