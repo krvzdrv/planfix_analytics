@@ -91,12 +91,17 @@ def get_tasks_with_produkty_analytics():
                 task_details_xml = get_task_details(task_id)
                 task_info = parse_task_details(task_details_xml)
                 
+                # Логируем детали задачи для отладки
+                logger.info(f"Task {task_id} details: {task_info}")
+                
                 # Проверяем, есть ли аналитика "Produkty"
                 if has_produkty_analytics(task_details_xml):
                     logger.info(f"Task {task_id} has Produkty analytics")
                     tasks_with_analytics.append(task)
                 else:
-                    logger.debug(f"Task {task_id} does not have Produkty analytics")
+                    logger.info(f"Task {task_id} does not have Produkty analytics")
+                    # Логируем XML для отладки
+                    logger.debug(f"Task {task_id} XML preview: {task_details_xml[:1000]}...")
                     
             except Exception as e:
                 logger.warning(f"Error checking task {task_id}: {e}")
@@ -116,12 +121,33 @@ def has_produkty_analytics(task_xml):
     try:
         root = ET.fromstring(task_xml)
         
-        # Ищем аналитики в задаче
-        for analitic in root.findall('.//analitic'):
+        # Логируем структуру XML для отладки
+        logger.info(f"XML root tag: {root.tag}")
+        logger.info(f"XML root attributes: {root.attrib}")
+        
+        # Ищем аналитики в разных возможных местах
+        analytics = root.findall('.//analitic')
+        if not analytics:
+            logger.info("No analytics found with './/analitic' path")
+            # Попробуем другие пути
+            analytics = root.findall('.//analytics')
+            if analytics:
+                logger.info(f"Found analytics with './/analytics' path: {len(analytics)}")
+            else:
+                logger.info("No analytics found with './/analytics' path either")
+        
+        logger.info(f"Found {len(analytics)} analytics in task")
+        
+        for i, analitic in enumerate(analytics):
             analitic_id = analitic.findtext('id')
+            analitic_name = analitic.findtext('name')
+            logger.info(f"  Analytics {i+1}: ID={analitic_id}, Name={analitic_name}")
+            
             if analitic_id and int(analitic_id) == PRODUKTY_ANALYTIC_KEY:
+                logger.info(f"  ✅ Found Produkty analytics with ID {analitic_id}")
                 return True
         
+        logger.info(f"  ❌ Produkty analytics (ID {PRODUKTY_ANALYTIC_KEY}) not found")
         return False
         
     except Exception as e:
