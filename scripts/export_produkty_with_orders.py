@@ -29,22 +29,75 @@ def get_tasks_with_produkty_analytics():
     Получает список задач (заказов) с прикрепленной аналитикой "Produkty"
     """
     try:
-        # Получаем список задач с аналитикой
+        # Сначала получаем список всех задач
         params = {
             'pageCurrent': 1,
             'pageSize': 100,
-            'analiticKeys': {
-                'key': PRODUKTY_ANALYTIC_KEY
+            'status': {
+                'id': '1'  # Активные задачи
             }
         }
         
-        logger.info("Fetching tasks with Produkty analytics...")
+        logger.info("Fetching tasks list...")
         response_xml = planfix_utils.make_planfix_request('task.getList', params)
-        return response_xml
+        
+        # Парсим список задач
+        tasks = parse_task_list(response_xml)
+        
+        if not tasks:
+            logger.info("No tasks found")
+            return []
+        
+        logger.info(f"Found {len(tasks)} tasks, checking for Produkty analytics...")
+        
+        # Фильтруем задачи, которые имеют аналитику "Produkty"
+        tasks_with_analytics = []
+        
+        for task in tasks[:20]:  # Проверяем первые 20 задач для экономии API вызовов
+            try:
+                task_id = task['id']
+                logger.info(f"Checking task {task_id} for Produkty analytics...")
+                
+                # Получаем детали задачи
+                task_details_xml = get_task_details(task_id)
+                task_info = parse_task_details(task_details_xml)
+                
+                # Проверяем, есть ли аналитика "Produkty"
+                if has_produkty_analytics(task_details_xml):
+                    logger.info(f"Task {task_id} has Produkty analytics")
+                    tasks_with_analytics.append(task)
+                else:
+                    logger.debug(f"Task {task_id} does not have Produkty analytics")
+                    
+            except Exception as e:
+                logger.warning(f"Error checking task {task_id}: {e}")
+                continue
+        
+        logger.info(f"Found {len(tasks_with_analytics)} tasks with Produkty analytics")
+        return tasks_with_analytics
         
     except Exception as e:
         logger.error(f"Error getting tasks with analytics: {e}")
         raise
+
+def has_produkty_analytics(task_xml):
+    """
+    Проверяет, есть ли в задаче аналитика "Produkty"
+    """
+    try:
+        root = ET.fromstring(task_xml)
+        
+        # Ищем аналитики в задаче
+        for analitic in root.findall('.//analitic'):
+            analitic_id = analitic.findtext('id')
+            if analitic_id and int(analitic_id) == PRODUKTY_ANALYTIC_KEY:
+                return True
+        
+        return False
+        
+    except Exception as e:
+        logger.warning(f"Error parsing task XML for analytics check: {e}")
+        return False
 
 def get_task_details(task_id):
     """
@@ -245,11 +298,14 @@ def export_produkty_with_orders():
         
         # Получаем список задач с аналитикой "Produkty"
         logger.info("Getting tasks with Produkty analytics...")
-        tasks_xml = get_tasks_with_produkty_analytics()
-        tasks = parse_task_list(tasks_xml)
+        tasks = get_tasks_with_produkty_analytics()
         
         if not tasks:
             logger.info("No tasks found with Produkty analytics")
+            logger.info("This might mean:")
+            logger.info("1. No tasks have Produkty analytics attached")
+            logger.info("2. All tasks are in different statuses")
+            logger.info("3. Produkty analytics ID might be incorrect")
             return
         
         logger.info(f"Found {len(tasks)} tasks with Produkty analytics")
