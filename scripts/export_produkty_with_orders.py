@@ -632,6 +632,38 @@ def get_analytics_data(analytic_key):
         logger.error(f"Error getting analytics data for key {analytic_key}: {e}")
         return None
 
+def convert_polish_number(value):
+    """
+    Преобразует польские числа (запятая как разделитель) в английский формат (точка как разделитель)
+    для корректной записи в Supabase numeric поля
+    """
+    if not value or value == '':
+        return None
+    
+    try:
+        # Убираем пробелы
+        value = str(value).strip()
+        
+        # Если пустая строка, возвращаем None
+        if value == '':
+            return None
+        
+        # Заменяем запятую на точку
+        value = value.replace(',', '.')
+        
+        # Убираем лишние пробелы
+        value = value.replace(' ', '')
+        
+        # Проверяем, что это число
+        float(value)
+        
+        return value
+        
+    except (ValueError, TypeError):
+        # Если не удалось преобразовать в число, возвращаем None
+        logger.warning(f"Could not convert value '{value}' to number, setting to None")
+        return None
+
 def parse_analytics_data(xml_text, task, action):
     """
     Парсит данные аналитики из XML ответа analitic.getData
@@ -698,14 +730,14 @@ def parse_analytics_data(xml_text, task, action):
                 'action_datetime': action.get('dateTime', ''),
                 'analytic_key': key,
                 'nazwa': field_data.get('27719', {}).get('value', ''),
-                'cena': field_data.get('27721', {}).get('value', ''),
+                'cena': convert_polish_number(field_data.get('27721', {}).get('value', '')),
                 'waluta': field_data.get('29133', {}).get('value', ''),
-                'ilosc': field_data.get('28079', {}).get('value', ''),
-                'rabat_percent': field_data.get('28109', {}).get('value', ''),
-                'cena_po_rabacie': field_data.get('28111', {}).get('value', ''),
-                'wartosc_netto': field_data.get('28081', {}).get('value', ''),
-                'prowizja_pln': field_data.get('29311', {}).get('value', ''),
-                'laczna_masa_kg': field_data.get('32907', {}).get('value', ''),
+                'ilosc': convert_polish_number(field_data.get('28079', {}).get('value', '')),
+                'rabat_percent': convert_polish_number(field_data.get('28109', {}).get('value', '')),
+                'cena_po_rabacie': convert_polish_number(field_data.get('28111', {}).get('value', '')),
+                'wartosc_netto': convert_polish_number(field_data.get('28081', {}).get('value', '')),
+                'prowizja_pln': convert_polish_number(field_data.get('29311', {}).get('value', '')),
+                'laczna_masa_kg': convert_polish_number(field_data.get('32907', {}).get('value', '')),
                 'updated_at': datetime.now(),
                 'is_deleted': False
             }
