@@ -10,8 +10,8 @@ import logging
 from datetime import datetime
 import xml.etree.ElementTree as ET
 import requests
+import time
 from dotenv import load_dotenv
-from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -120,10 +120,15 @@ def get_tasks_with_produkty_analytics():
         # Фильтруем задачи, которые имеют аналитику "Produkty" в действиях
         tasks_with_analytics = []
         
-        for task in all_tasks:  # Проверяем ВСЕ заказы для получения максимального количества данных
+        for i, task in enumerate(all_tasks, 1):  # Проверяем ВСЕ заказы для получения максимального количества данных
             try:
                 task_id = task['id']
-                logger.info(f"Checking order {task_id} for Produkty analytics in actions...")
+                logger.info(f"Checking order {task_id} for Produkty analytics in actions... ({i}/{len(all_tasks)})")
+                
+                # Добавляем задержку каждые 5 задач для избежания превышения лимитов API
+                if i % 5 == 0:
+                    logger.info(f"  Adding delay to avoid API limits...")
+                    time.sleep(2)  # 2 секунды задержки каждые 5 задач
                 
                 # Получаем список действий в задаче
                 actions_xml = get_task_actions(task_id)
@@ -432,7 +437,7 @@ def clean_field_name(field_name):
 
 def get_task_actions(task_id):
     """
-    Получает список действий в задаче через action.getList
+    Получает список действий в задаче через action.getList с обработкой лимитов
     """
     try:
         headers = {
@@ -448,9 +453,12 @@ def get_task_actions(task_id):
             f'  <id>{task_id}</id>'
             '</task>'
             '<pageCurrent>1</pageCurrent>'
-            '<pageSize>100</pageSize>'
+            '<pageSize>50</pageSize>'  # Уменьшаем размер страницы для избежания лимитов
             '</request>'
         )
+        
+        # Добавляем задержку для избежания превышения лимитов API
+        time.sleep(0.5)  # 500ms задержка между запросами
         
         response = requests.post(
             planfix_utils.PLANFIX_API_URL,
@@ -496,7 +504,7 @@ def parse_task_actions(xml_text):
 
 def get_action_details(action_id):
     """
-    Получает детали действия через action.get
+    Получает детали действия через action.get с обработкой лимитов
     """
     try:
         headers = {
@@ -513,6 +521,9 @@ def get_action_details(action_id):
             '</action>'
             '</request>'
         )
+        
+        # Добавляем задержку для избежания превышения лимитов API
+        time.sleep(0.3)  # 300ms задержка между запросами
         
         response = requests.post(
             planfix_utils.PLANFIX_API_URL,
