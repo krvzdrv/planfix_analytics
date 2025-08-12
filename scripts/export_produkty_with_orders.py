@@ -131,14 +131,17 @@ def get_tasks_with_produkty_analytics():
                 
                 logger.info(f"Order {task_id} has {len(actions)} actions")
                 
-                # Фильтруем только действия с аналитикой Produkty (проверяем максимум 20 действий для ускорения)
+                # Фильтруем только действия с аналитикой Produkty (проверяем ВСЕ действия)
                 actions_with_produkty = []
-                actions_to_check = actions[:20]  # Ограничиваем количество проверяемых действий
-                logger.info(f"  Checking first {len(actions_to_check)} actions out of {len(actions)} total")
+                logger.info(f"  Checking all {len(actions)} actions for Produkty analytics")
                 
-                for action in actions_to_check:
+                for i, action in enumerate(actions, 1):
                     action_id = action.get('id')
                     if action_id:
+                        # Показываем прогресс каждые 10 действий
+                        if i % 10 == 0 or i == len(actions):
+                            logger.info(f"  Progress: {i}/{len(actions)} actions checked...")
+                        
                         # Получаем детали действия
                         action_details_xml = get_action_details(action_id)
                         if has_produkty_analytics_in_action(action_details_xml):
