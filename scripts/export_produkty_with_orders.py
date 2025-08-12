@@ -563,16 +563,21 @@ def extract_produkty_analytics_data_from_action(action_xml, task, action):
                 logger.info(f"Processing Produkty analytics: ID={analytic_id}, Name={analytic_name}")
                 
                 # Получаем данные аналитики через analitic.getData
+                logger.info(f"Requesting data for analytics {analytic_id}...")
                 analytic_data = get_analytics_data(analytic_id)
                 if analytic_data:
+                    logger.info(f"✅ Got analytics data for {analytic_id}, length: {len(analytic_data)}")
+                    logger.info(f"Parsing analytics data...")
                     parsed_data = parse_analytics_data(analytic_data, task, action)
                     if parsed_data:
                         analytics_data.extend(parsed_data)
-                        logger.info(f"Successfully parsed {len(parsed_data)} records from analytics {analytic_id}")
+                        logger.info(f"✅ Successfully parsed {len(parsed_data)} records from analytics {analytic_id}")
                     else:
-                        logger.warning(f"No data parsed from analytics {analytic_id}")
+                        logger.warning(f"❌ No data parsed from analytics {analytic_id}")
+                        logger.warning(f"This means the XML structure is different than expected")
                 else:
-                    logger.warning(f"Failed to get data for analytics {analytic_id}")
+                    logger.warning(f"❌ Failed to get data for analytics {analytic_id}")
+                    logger.warning(f"This means analitic.getData returned empty or error response")
         
         return analytics_data
         
@@ -743,6 +748,7 @@ def export_produkty_with_orders():
             return
         
         logger.info(f"Found {len(tasks)} tasks with Produkty analytics")
+        logger.info("Starting data extraction process...")
         
         all_analytics_data = []
         
@@ -759,6 +765,7 @@ def export_produkty_with_orders():
                 logger.info(f"Task {task_id} has {len(actions)} actions")
                 
                 # Ищем аналитику "Produkty" в действиях
+                found_analytics_in_task = False
                 for action in actions:
                     action_id = action.get('id')
                     if action_id:
@@ -772,18 +779,29 @@ def export_produkty_with_orders():
                         if analytics_data:
                             all_analytics_data.extend(analytics_data)
                             logger.info(f"  ✅ Extracted {len(analytics_data)} analytics records from action {action_id}")
+                            found_analytics_in_task = True
                         else:
                             logger.info(f"  ❌ No Produkty analytics data found in action {action_id}")
+                
+                if found_analytics_in_task:
+                    logger.info(f"✅ Task {task_id} successfully processed with analytics data")
+                else:
+                    logger.warning(f"⚠️ Task {task_id} processed but no analytics data extracted")
                     
             except Exception as e:
                 logger.error(f"Error processing task {task_id}: {e}")
                 continue
         
+        logger.info("Data extraction process completed.")
+        logger.info(f"Total analytics records collected: {len(all_analytics_data)}")
+        
         if not all_analytics_data:
-            logger.info("No analytics data to export")
+            logger.warning("⚠️ No analytics data to export!")
+            logger.warning("This means the analytics were found but data extraction failed.")
             return
         
-        logger.info(f"Total analytics records to export: {len(all_analytics_data)}")
+        logger.info(f"✅ Total analytics records to export: {len(all_analytics_data)}")
+        logger.info("Starting Supabase export process...")
         
         # Получаем структуру таблицы
         with conn.cursor() as cur:
