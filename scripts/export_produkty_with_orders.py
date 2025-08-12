@@ -867,16 +867,22 @@ def export_produkty_with_orders():
         # Обновляем данные в Supabase
         logger.info("Starting Supabase upsert...")
         try:
-            # Временно используем 'id' как primary key, пока не узнаем правильную структуру
-            primary_key_column = 'id'  # TODO: заменить на правильный primary key после проверки структуры таблицы
+            # Используем комбинацию полей как уникальный ключ для upsert
+            # Поскольку 'id' - автоинкрементный, используем комбинацию task_id + action_id + analytic_key
+            unique_columns = ['task_id', 'action_id', 'analytic_key']
             
-            logger.info(f"Using '{primary_key_column}' as primary key for upsert")
+            logger.info(f"Using composite unique key: {unique_columns}")
             
+            # Создаем составной ключ для каждой записи
+            for record in prepared_data:
+                record['_composite_key'] = f"{record.get('task_id', '')}_{record.get('action_id', '')}_{record.get('analytic_key', '')}"
+            
+            # Используем составной ключ для upsert
             planfix_utils.upsert_data_to_supabase(
                 conn,
                 PRODUKTY_TABLE_NAME,
-                primary_key_column,
-                table_columns,
+                '_composite_key',  # Временное поле для upsert
+                table_columns + ['_composite_key'],  # Добавляем составной ключ
                 prepared_data
             )
             logger.info(f"✅ Successfully upserted {len(prepared_data)} records to Supabase")
@@ -884,24 +890,24 @@ def export_produkty_with_orders():
             logger.error(f"❌ Error during Supabase upsert: {e}")
             raise
         
-        # Получаем список всех ключей для пометки удаленных записей
-        all_keys = [item['analytic_key'] for item in prepared_data if item.get('analytic_key')]
+        # Получаем список всех составных ключей для пометки удаленных записей
+        all_composite_keys = [item['_composite_key'] for item in prepared_data if item.get('_composite_key')]
         
         # Помечаем записи как удаленные
-        if all_keys:
+        if all_composite_keys:
             logger.info("Marking old records as deleted...")
             try:
                 planfix_utils.mark_items_as_deleted_in_supabase(
                     conn,
                     PRODUKTY_TABLE_NAME,
-                    'analytic_key',
-                    all_keys
+                    '_composite_key',  # Используем составной ключ
+                    all_composite_keys
                 )
                 logger.info("✅ Successfully marked old records as deleted")
             except Exception as e:
                 logger.error(f"❌ Error marking records as deleted: {e}")
         else:
-            logger.warning("⚠️ No analytic keys found for deletion marking")
+            logger.warning("⚠️ No composite keys found for deletion marking")
         
         logger.info("--- Produkty Analytics Export with Orders finished successfully ---")
         
