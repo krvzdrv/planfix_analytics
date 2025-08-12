@@ -131,24 +131,25 @@ def get_tasks_with_produkty_analytics():
                 
                 logger.info(f"Order {task_id} has {len(actions)} actions")
                 
-                # Проверяем каждое действие на наличие аналитики "Produkty"
-                has_produkty = False
-                for action in actions:  # Проверяем ВСЕ действия в каждой задаче
+                # Фильтруем только действия с аналитикой Produkty (проверяем максимум 20 действий для ускорения)
+                actions_with_produkty = []
+                actions_to_check = actions[:20]  # Ограничиваем количество проверяемых действий
+                logger.info(f"  Checking first {len(actions_to_check)} actions out of {len(actions)} total")
+                
+                for action in actions_to_check:
                     action_id = action.get('id')
                     if action_id:
-                        logger.info(f"  Checking action {action_id} for Produkty analytics...")
-                        
                         # Получаем детали действия
                         action_details_xml = get_action_details(action_id)
                         if has_produkty_analytics_in_action(action_details_xml):
                             logger.info(f"  ✅ Action {action_id} has Produkty analytics!")
-                            has_produkty = True
-                            break
-                        else:
-                            logger.info(f"  ❌ Action {action_id} does not have Produkty analytics")
+                            actions_with_produkty.append(action)
+                        # Убираем логирование для действий без аналитики - ускоряем процесс
                 
-                if has_produkty:
-                    logger.info(f"Order {task_id} has Produkty analytics in actions")
+                if actions_with_produkty:
+                    logger.info(f"Order {task_id} has {len(actions_with_produkty)} actions with Produkty analytics")
+                    # Добавляем действия с аналитикой в задачу для дальнейшей обработки
+                    task['actions_with_produkty'] = actions_with_produkty
                     tasks_with_analytics.append(task)
                 else:
                     logger.info(f"Order {task_id} does not have Produkty analytics in any action")
@@ -829,21 +830,24 @@ def export_produkty_with_orders():
         
         all_analytics_data = []
         
-        # Обрабатываем каждую задачу
+        # Обрабатываем каждую задачу (действия уже найдены на предыдущем этапе)
         for task in tasks:
             task_id = task['id']
             logger.info(f"Processing task ID: {task_id}, Name: {task.get('name', 'Unknown')}")
             
             try:
-                # Получаем список действий в задаче
-                actions_xml = get_task_actions(task_id)
-                actions = parse_task_actions(actions_xml)
+                # Используем уже найденные действия с аналитикой Produkty
+                actions_with_produkty = task.get('actions_with_produkty', [])
                 
-                logger.info(f"Task {task_id} has {len(actions)} actions")
+                if not actions_with_produkty:
+                    logger.warning(f"⚠️ Task {task_id} has no actions with Produkty analytics")
+                    continue
                 
-                # Ищем аналитику "Produkty" в действиях
+                logger.info(f"Task {task_id} has {len(actions_with_produkty)} actions with Produkty analytics")
+                
+                # Обрабатываем только действия с аналитикой Produkty
                 found_analytics_in_task = False
-                for action in actions:
+                for action in actions_with_produkty:
                     action_id = action.get('id')
                     if action_id:
                         logger.info(f"  Processing action {action_id} for Produkty analytics data...")
@@ -858,7 +862,7 @@ def export_produkty_with_orders():
                             logger.info(f"  ✅ Extracted {len(analytics_data)} analytics records from action {action_id}")
                             found_analytics_in_task = True
                         else:
-                            logger.info(f"  ❌ No Produkty analytics data found in action {action_id}")
+                            logger.warning(f"  ⚠️ No Produkty analytics data found in action {action_id}")
                 
                 if found_analytics_in_task:
                     logger.info(f"✅ Task {task_id} successfully processed with analytics data")
