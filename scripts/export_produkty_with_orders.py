@@ -29,17 +29,18 @@ def get_tasks_with_produkty_analytics():
     Получает список задач (заказов) с прикрепленной аналитикой "Produkty"
     """
     try:
-        # Сначала получаем список всех задач
+        # Получаем список всех задач без фильтров
         params = {
             'pageCurrent': 1,
-            'pageSize': 100,
-            'status': {
-                'id': '1'  # Активные задачи
-            }
+            'pageSize': 50  # Уменьшаем количество для начала
         }
         
         logger.info("Fetching tasks list...")
         response_xml = planfix_utils.make_planfix_request('task.getList', params)
+        
+        # Логируем ответ для отладки
+        logger.info(f"API response length: {len(response_xml)}")
+        logger.debug(f"API response preview: {response_xml[:500]}...")
         
         # Парсим список задач
         tasks = parse_task_list(response_xml)
@@ -53,7 +54,7 @@ def get_tasks_with_produkty_analytics():
         # Фильтруем задачи, которые имеют аналитику "Produkty"
         tasks_with_analytics = []
         
-        for task in tasks[:20]:  # Проверяем первые 20 задач для экономии API вызовов
+        for task in tasks[:10]:  # Проверяем первые 10 задач для экономии API вызовов
             try:
                 task_id = task['id']
                 logger.info(f"Checking task {task_id} for Produkty analytics...")
