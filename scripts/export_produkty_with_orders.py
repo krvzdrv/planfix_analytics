@@ -867,22 +867,23 @@ def export_produkty_with_orders():
         # Обновляем данные в Supabase
         logger.info("Starting Supabase upsert...")
         try:
-            # Используем комбинацию полей как уникальный ключ для upsert
-            # Поскольку 'id' - автоинкрементный, используем комбинацию task_id + action_id + analytic_key
-            unique_columns = ['task_id', 'action_id', 'analytic_key']
+            # Используем существующие колонки для upsert
+            # Поскольку 'id' - автоинкрементный, используем комбинацию существующих полей
+            unique_columns = ['task_id', 'planfix_analytic_id', 'planfix_item_id']
             
-            logger.info(f"Using composite unique key: {unique_columns}")
+            logger.info(f"Using composite unique key from existing columns: {unique_columns}")
             
-            # Создаем составной ключ для каждой записи
+            # Создаем составной ключ из существующих полей
             for record in prepared_data:
-                record['_composite_key'] = f"{record.get('task_id', '')}_{record.get('action_id', '')}_{record.get('analytic_key', '')}"
+                # Используем существующие поля для составного ключа
+                record['composite_key'] = f"{record.get('task_id', '')}_{record.get('planfix_analytic_id', record.get('analytic_key', ''))}_{record.get('planfix_item_id', record.get('action_id', ''))}"
             
             # Используем составной ключ для upsert
             planfix_utils.upsert_data_to_supabase(
                 conn,
                 PRODUKTY_TABLE_NAME,
-                '_composite_key',  # Временное поле для upsert
-                table_columns + ['_composite_key'],  # Добавляем составной ключ
+                'composite_key',  # Используем поле, которое мы создаем
+                table_columns + ['composite_key'],  # Добавляем составной ключ
                 prepared_data
             )
             logger.info(f"✅ Successfully upserted {len(prepared_data)} records to Supabase")
@@ -891,7 +892,7 @@ def export_produkty_with_orders():
             raise
         
         # Получаем список всех составных ключей для пометки удаленных записей
-        all_composite_keys = [item['_composite_key'] for item in prepared_data if item.get('_composite_key')]
+        all_composite_keys = [item['composite_key'] for item in prepared_data if item.get('composite_key')]
         
         # Помечаем записи как удаленные
         if all_composite_keys:
@@ -900,7 +901,7 @@ def export_produkty_with_orders():
                 planfix_utils.mark_items_as_deleted_in_supabase(
                     conn,
                     PRODUKTY_TABLE_NAME,
-                    '_composite_key',  # Используем составной ключ
+                    'composite_key',  # Используем составной ключ
                     all_composite_keys
                 )
                 logger.info("✅ Successfully marked old records as deleted")
