@@ -243,9 +243,9 @@ def get_task_details(task_id):
         logger.error(f"Error getting task details for ID {task_id}: {e}")
         raise
 
-def get_produkty_analytics_data(task_id):
+def get_produkty_analytics_data_by_condition(task_ids=None, page_size=100):
     """
-    Получает данные аналитики "Produkty" для конкретной задачи
+    Получает все данные аналитики "Produkty" по условию (значительно быстрее)
     """
     try:
         headers = {
@@ -253,18 +253,18 @@ def get_produkty_analytics_data(task_id):
             'Accept': 'application/xml'
         }
         
+        # Формируем запрос для получения всех данных аналитики Produkty
         body = (
             '<?xml version="1.0" encoding="UTF-8"?>'
-            '<request method="analitic.getData">'
+            '<request method="analitic.getDataByCondition">'
             f'<account>{planfix_utils.PLANFIX_ACCOUNT}</account>'
-            '<analiticKeys>'
-            f'<key>{PRODUKTY_ANALYTIC_KEY}</key>'
-            '</analiticKeys>'
-            f'<taskId>{task_id}</taskId>'
+            f'<analitic><id>{PRODUKTY_ANALYTIC_KEY}</id></analitic>'
+            '<pageSize>100</pageSize>'
+            '<pageCurrent>1</pageCurrent>'
             '</request>'
         )
         
-        logger.info(f"Fetching Produkty analytics data for task ID: {task_id}")
+        logger.info(f"Fetching all Produkty analytics data by condition (page size: {page_size})")
         
         response = requests.post(
             planfix_utils.PLANFIX_API_URL,
@@ -276,7 +276,7 @@ def get_produkty_analytics_data(task_id):
         return response.text
         
     except Exception as e:
-        logger.error(f"Error getting analytics data for task ID {task_id}: {e}")
+        logger.error(f"Error getting analytics data by condition: {e}")
         raise
 
 def parse_task_list(xml_text):
@@ -708,9 +708,102 @@ def convert_polish_number(value):
         logger.warning(f"Could not convert value '{value}' to number, setting to None")
         return None
 
+def parse_analytics_data_by_condition(xml_text, tasks_dict):
+    """
+    Парсит данные аналитики из XML ответа analitic.getDataByCondition
+    """
+    try:
+        root = ET.fromstring(xml_text)
+        if root.attrib.get("status") == "error":
+            code = root.findtext("code")
+            message = root.findtext("message")
+            logger.error(f"Planfix API error: code={code}, message={message}")
+            return []
+        
+        logger.info(f"Parsing analytics data by condition XML...")
+        logger.debug(f"XML root tag: {root.tag}")
+        logger.debug(f"XML root attributes: {root.attrib}")
+        
+        analytics_records = []
+        
+        # Ищем данные аналитики
+        analitic_data_nodes = root.findall('.//analiticData')
+        logger.info(f"Found {len(analitic_data_nodes)} analiticData nodes")
+        
+        if not analitic_data_nodes:
+            logger.warning("No analiticData nodes found in XML")
+            return []
+        
+        for analitic_data in analitic_data_nodes:
+            key = analitic_data.findtext('key')
+            task_id = analitic_data.findtext('.//task/id')
+            action_id = analitic_data.findtext('.//action/id')
+            
+            logger.info(f"Processing analiticData with key: {key}, task_id: {task_id}, action_id: {action_id}")
+            
+            # Находим задачу по ID
+            task = tasks_dict.get(int(task_id)) if task_id else None
+            if not task:
+                logger.warning(f"Task {task_id} not found in tasks dictionary, skipping...")
+                continue
+            
+            # Собираем данные полей
+            field_data = {}
+            item_data_nodes = analitic_data.findall('.//itemData')
+            logger.info(f"Found {len(item_data_nodes)} itemData nodes")
+            
+            for item_data in item_data_nodes:
+                field_id = item_data.findtext('id')
+                field_name = item_data.findtext('name')
+                field_value = item_data.findtext('value')
+                field_value_id = item_data.findtext('valueId')
+                
+                logger.debug(f"Field: ID={field_id}, Name={field_name}, Value={field_value}, ValueID={field_value_id}")
+                
+                if field_id:
+                    field_data[field_id] = {
+                        'name': field_name,
+                        'value': field_value,
+                        'valueId': field_value_id
+                    }
+            
+            logger.info(f"Collected field data: {field_data}")
+            
+            # Создаем запись для Supabase с правильными названиями полей
+            record = {
+                'task_id': int(task_id),
+                'task_name': task.get('name', ''),
+                'action_id': int(action_id) if action_id else None,
+                'analytic_key': key,
+                'nazwa': field_data.get('27719', {}).get('value', ''),
+                'nazwa_handbook_id': field_data.get('27719', {}).get('valueId', ''),
+                'cena': convert_polish_number(field_data.get('27721', {}).get('value', '')),
+                'waluta': field_data.get('29133', {}).get('value', ''),
+                'ilosc': convert_polish_number(field_data.get('28079', {}).get('value', '')),
+                'rabat_procent': convert_polish_number(field_data.get('28109', {}).get('value', '')),
+                'cena_po_rabacie': convert_polish_number(field_data.get('28111', {}).get('value', '')),
+                'wartosc_netto': convert_polish_number(field_data.get('28081', {}).get('value', '')),
+                'prowizja_pln': convert_polish_number(field_data.get('29311', {}).get('value', '')),
+                'laczna_masa_kg': convert_polish_number(field_data.get('32907', {}).get('value', '')),
+                'order_number': task.get('order_number', ''),  # Используем номер заказа из customData
+                'updated_at': datetime.now(),
+                'is_deleted': False
+            }
+            
+            logger.info(f"Created record: {record}")
+            analytics_records.append(record)
+        
+        logger.info(f"Total records parsed: {len(analytics_records)}")
+        return analytics_records
+        
+    except Exception as e:
+        logger.error(f"Error parsing analytics data by condition: {e}")
+        logger.error(f"XML content: {xml_text[:500]}...")
+        return []
+
 def parse_analytics_data(xml_text, task, action):
     """
-    Парсит данные аналитики из XML ответа analitic.getData
+    Парсит данные аналитики из XML ответа analitic.getData (для обратной совместимости)
     """
     try:
         root = ET.fromstring(xml_text)
@@ -833,48 +926,69 @@ def export_produkty_with_orders():
         
         all_analytics_data = []
         
-        # Обрабатываем каждую задачу (действия уже найдены на предыдущем этапе)
-        for task in tasks:
-            task_id = task['id']
-            logger.info(f"Processing task ID: {task_id}, Name: {task.get('name', 'Unknown')}")
+        # Создаем словарь задач для быстрого поиска
+        tasks_dict = {task['id']: task for task in tasks}
+        logger.info(f"Created tasks dictionary with {len(tasks_dict)} tasks")
+        
+        # Используем оптимизированный подход - получаем все данные аналитики одним запросом
+        logger.info("Using optimized approach: getting all Produkty analytics data by condition...")
+        
+        try:
+            # Получаем все данные аналитики Produkty одним запросом
+            analytics_xml = get_produkty_analytics_data_by_condition()
             
-            try:
-                # Используем уже найденные действия с аналитикой Produkty
-                actions_with_produkty = task.get('actions_with_produkty', [])
+            # Парсим данные аналитики
+            all_analytics_data = parse_analytics_data_by_condition(analytics_xml, tasks_dict)
+            
+            logger.info(f"✅ Successfully extracted {len(all_analytics_data)} analytics records using optimized approach")
+            
+        except Exception as e:
+            logger.error(f"Error using optimized approach: {e}")
+            logger.info("Falling back to traditional approach...")
+            
+            # Fallback к традиционному подходу
+            all_analytics_data = []
+            for task in tasks:
+                task_id = task['id']
+                logger.info(f"Processing task ID: {task_id}, Name: {task.get('name', 'Unknown')}")
                 
-                if not actions_with_produkty:
-                    logger.warning(f"⚠️ Task {task_id} has no actions with Produkty analytics")
-                    continue
-                
-                logger.info(f"Task {task_id} has {len(actions_with_produkty)} actions with Produkty analytics")
-                
-                # Обрабатываем только действия с аналитикой Produkty
-                found_analytics_in_task = False
-                for action in actions_with_produkty:
-                    action_id = action.get('id')
-                    if action_id:
-                        logger.info(f"  Processing action {action_id} for Produkty analytics data...")
-                        
-                        # Получаем детали действия
-                        action_details_xml = get_action_details(action_id)
-                        
-                        # Извлекаем данные аналитики "Produkty" из действия
-                        analytics_data = extract_produkty_analytics_data_from_action(action_details_xml, task, action)
-                        if analytics_data:
-                            all_analytics_data.extend(analytics_data)
-                            logger.info(f"  ✅ Extracted {len(analytics_data)} analytics records from action {action_id}")
-                            found_analytics_in_task = True
-                        else:
-                            logger.warning(f"  ⚠️ No Produkty analytics data found in action {action_id}")
-                
-                if found_analytics_in_task:
-                    logger.info(f"✅ Task {task_id} successfully processed with analytics data")
-                else:
-                    logger.warning(f"⚠️ Task {task_id} processed but no analytics data extracted")
+                try:
+                    # Используем уже найденные действия с аналитикой Produkty
+                    actions_with_produkty = task.get('actions_with_produkty', [])
                     
-            except Exception as e:
-                logger.error(f"Error processing task {task_id}: {e}")
-                continue
+                    if not actions_with_produkty:
+                        logger.warning(f"⚠️ Task {task_id} has no actions with Produkty analytics")
+                        continue
+                    
+                    logger.info(f"Task {task_id} has {len(actions_with_produkty)} actions with Produkty analytics")
+                    
+                    # Обрабатываем только действия с аналитикой Produkty
+                    found_analytics_in_task = False
+                    for action in actions_with_produkty:
+                        action_id = action.get('id')
+                        if action_id:
+                            logger.info(f"  Processing action {action_id} for Produkty analytics data...")
+                            
+                            # Получаем детали действия
+                            action_details_xml = get_action_details(action_id)
+                            
+                            # Извлекаем данные аналитики "Produkty" из действия
+                            analytics_data = extract_produkty_analytics_data_from_action(action_details_xml, task, action)
+                            if analytics_data:
+                                all_analytics_data.extend(analytics_data)
+                                logger.info(f"  ✅ Extracted {len(analytics_data)} analytics records from action {action_id}")
+                                found_analytics_in_task = True
+                            else:
+                                logger.warning(f"  ⚠️ No Produkty analytics data found in action {action_id}")
+                    
+                    if found_analytics_in_task:
+                        logger.info(f"✅ Task {task_id} successfully processed with analytics data")
+                    else:
+                        logger.warning(f"⚠️ Task {task_id} processed but no analytics data extracted")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing task {task_id}: {e}")
+                    continue
         
         logger.info("Data extraction process completed.")
         logger.info(f"Total analytics records collected: {len(all_analytics_data)}")
