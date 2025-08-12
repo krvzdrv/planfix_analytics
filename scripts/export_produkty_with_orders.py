@@ -32,7 +32,7 @@ def get_tasks_with_produkty_analytics():
     """
     try:
         # Используем правильный подход с ручным формированием XML
-        # Ищем только задачи-заказы по шаблону 2420917
+        # Ищем только задачи-заказы по шаблону 2420917 (как в рабочем примере)
         headers = {
             'Content-Type': 'application/xml',
             'Accept': 'application/xml'
@@ -91,7 +91,7 @@ def get_tasks_with_produkty_analytics():
         # Фильтруем задачи, которые имеют аналитику "Produkty" в действиях
         tasks_with_analytics = []
         
-        for task in tasks[:20]:  # Проверяем первые 20 заказов
+        for task in tasks[:10]:  # Проверяем первые 10 заказов для экономии API вызовов
             try:
                 task_id = task['id']
                 logger.info(f"Checking order {task_id} for Produkty analytics in actions...")
@@ -600,6 +600,9 @@ def get_analytics_data(analytic_id):
             '</request>'
         )
         
+        logger.info(f"Requesting analytics data for ID {analytic_id}...")
+        logger.debug(f"Request body: {body}")
+        
         response = requests.post(
             planfix_utils.PLANFIX_API_URL,
             data=body.encode('utf-8'),
@@ -607,7 +610,13 @@ def get_analytics_data(analytic_id):
             auth=(planfix_utils.PLANFIX_API_KEY, planfix_utils.PLANFIX_TOKEN)
         )
         response.raise_for_status()
-        return response.text
+        response_text = response.text
+        
+        # Детальное логирование ответа
+        logger.info(f"Analytics data response length: {len(response_text)}")
+        logger.info(f"Analytics data response preview: {response_text[:1000]}...")
+        
+        return response_text
         
     except Exception as e:
         logger.error(f"Error getting analytics data for {analytic_id}: {e}")
@@ -625,19 +634,41 @@ def parse_analytics_data(xml_text, task, action):
             logger.error(f"Planfix API error: code={code}, message={message}")
             return []
         
+        logger.info(f"Parsing analytics data XML...")
+        logger.debug(f"XML root tag: {root.tag}")
+        logger.debug(f"XML root attributes: {root.attrib}")
+        
         analytics_records = []
         
         # Ищем данные аналитики
-        for analitic_data in root.findall('.//analiticData'):
+        analitic_data_nodes = root.findall('.//analiticData')
+        logger.info(f"Found {len(analitic_data_nodes)} analiticData nodes")
+        
+        if not analitic_data_nodes:
+            logger.warning("No analiticData nodes found in XML")
+            # Попробуем альтернативные пути
+            alternative_nodes = root.findall('.//analitic')
+            logger.info(f"Alternative search: found {len(alternative_nodes)} analitic nodes")
+            if alternative_nodes:
+                for node in alternative_nodes:
+                    logger.debug(f"Analytic node: {ET.tostring(node, encoding='unicode')}")
+        
+        for analitic_data in analitic_data_nodes:
             key = analitic_data.findtext('key')
+            logger.info(f"Processing analiticData with key: {key}")
             
             # Собираем данные полей
             field_data = {}
-            for item_data in analitic_data.findall('.//itemData'):
+            item_data_nodes = analitic_data.findall('.//itemData')
+            logger.info(f"Found {len(item_data_nodes)} itemData nodes")
+            
+            for item_data in item_data_nodes:
                 field_id = item_data.findtext('id')
                 field_name = item_data.findtext('name')
                 field_value = item_data.findtext('value')
                 field_value_id = item_data.findtext('valueId')
+                
+                logger.debug(f"Field: ID={field_id}, Name={field_name}, Value={field_value}, ValueID={field_value_id}")
                 
                 if field_id:
                     field_data[field_id] = {
@@ -645,6 +676,8 @@ def parse_analytics_data(xml_text, task, action):
                         'value': field_value,
                         'valueId': field_value_id
                     }
+            
+            logger.info(f"Collected field data: {field_data}")
             
             # Создаем запись для Supabase
             record = {
@@ -667,12 +700,15 @@ def parse_analytics_data(xml_text, task, action):
                 'is_deleted': False
             }
             
+            logger.info(f"Created record: {record}")
             analytics_records.append(record)
         
+        logger.info(f"Total records parsed: {len(analytics_records)}")
         return analytics_records
         
     except Exception as e:
         logger.error(f"Error parsing analytics data: {e}")
+        logger.error(f"XML content: {xml_text[:500]}...")
         return []
 
 def export_produkty_with_orders():
